@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WebClaw by ProTalk — AI Браузерный Агент</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      width: 420px;
+      margin: 0;
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1115;
+      color: #e6e8eb;
+      padding: 12px;
+    }
+    h1 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+    .logo { font-size: 20px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
+    .dot.idle    { background: #374151; }
+    .dot.working { background: #16a34a; box-shadow: 0 0 6px #16a34a; }
+    .dot.paused  { background: #ca8a04; box-shadow: 0 0 6px #ca8a04; }
+    .dot.error   { background: #dc2626; }
+    label { display: block; font-size: 11px; color: #9aa3af; margin: 8px 0 4px; }
+    textarea, input[type=number], input[type=text] {
+      width: 100%;
+      resize: vertical;
+      background: #1a1d24;
+      color: #e6e8eb;
+      border: 1px solid #2a2f3a;
+      border-radius: 6px;
+      padding: 8px;
+      font: inherit;
+    }
+    textarea { min-height: 70px; }
+    textarea.small { min-height: 50px; }
+    input[type=number] { width: 80px; }
+    textarea:focus, input:focus, input[type=text]:focus { outline: none; border-color: #5b8def; }
+    .row { display: flex; gap: 6px; margin-top: 10px; }
+    button {
+      flex: 1;
+      padding: 8px 10px;
+      border: 0; border-radius: 6px;
+      font: inherit; cursor: pointer;
+      background: #2a2f3a; color: #e6e8eb;
+    }
+    button.primary { background: #2563eb; }
+    button.primary:hover { background: #1d4fd1; }
+    button.danger  { background: #b91c1c; }
+    button.warn    { background: #ca8a04; }
+    button.ghost   { background: transparent; border: 1px solid #2a2f3a; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .meta { font-size: 11px; color: #9aa3af; margin-top: 8px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .log {
+      margin-top: 10px;
+      max-height: 180px;
+      overflow: auto;
+      background: #0b0d11;
+      border: 1px solid #1f2330;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+    }
+    .log .err { color: #fca5a5; }
+    .log .ok  { color: #86efac; }
+    .log .act { color: #93c5fd; }
+    .check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9aa3af; margin-top: 6px; }
+
+    /* AI Thought Card */
+    .ai-thought-card {
+      background: linear-gradient(135deg, #1e1b4b 0%, #2e1065 100%);
+      border: 1px solid #4338ca;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin: 10px 0;
+      box-shadow: 0 4px 12px rgba(67, 56, 202, 0.2);
+      animation: fadeIn 0.3s ease;
+    }
+    .ai-thought-header {
+      font-size: 11px;
+      color: #a5b4fc;
+      font-weight: 600;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ai-thought-header::before {
+      content: '🧠';
+      font-size: 14px;
+    }
+    .ai-thought-text {
+      font-size: 12px;
+      color: #e0e7ff;
+      font-style: italic;
+      line-height: 1.5;
+    }
+    .ai-action-text {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(99, 102, 241, 0.3);
+      font-size: 11px;
+      font-weight: 600;
+      color: #818cf8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ai-action-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: rgba(99, 102, 241, 0.2);
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .ai-thought-card.hidden {
+      display: none;
+    }
+
+    /* Preset Tasks */
+    .presets {
+      margin: 12px 0;
+      padding: 10px;
+      background: #11141b;
+      border-radius: 8px;
+      border: 1px solid #1f2330;
+    }
+    .presets-title {
+      font-size: 11px;
+      color: #9aa3af;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .presets-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .preset-btn {
+      padding: 8px 10px;
+      background: #1a1d24;
+      color: #e6e8eb;
+      border: 1px solid #2a2f3a;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .preset-btn:hover {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+    .preset-btn .icon { font-size: 14px; }
+    .preset-btn .badge {
+      margin-left: auto;
+      font-size: 9px;
+      background: #374151;
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+    .preset-btn .badge.popular { background: #16a34a; }
+
+    /* Export button */
+    .export-btn {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      font-weight: 500;
+    }
+    .export-btn:hover {
+      background: linear-gradient(135deg, #059669, #047857);
+    }
+
+    /* Phase indicator */
+    .phase-indicator {
+      margin: 8px 0;
+      display: none;
+    }
+    .phase-indicator.active { display: block; }
+    .phase-bar {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 4px;
+    }
+    .phase-step {
+      flex: 1;
+      height: 4px;
+      border-radius: 2px;
+      background: #1f2330;
+      transition: background 0.3s;
+    }
+    .phase-step.done { background: #16a34a; }
+    .phase-step.current { background: #38bdf8; animation: pulse-bar 1.5s ease-in-out infinite; }
+    .phase-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: #6b7280;
+    }
+    @keyframes pulse-bar {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+  </style>
+</head>
+<body>
+  <h1><span class="logo">🦞</span> <span class="dot" id="dot"></span> WebClaw by ProTalk</h1>
+
+  <!-- Quick Preset Tasks (collapsible) -->
+  <details class="presets">
+    <summary class="presets-title">⚡ Быстрые действия</summary>
+    <div class="presets-grid">
+      <button class="preset-btn" data-task="Apply to all suitable jobs on this page" data-context="Search for jobs matching my experience. Auto-fill applications with my resume details. Skip jobs requiring login if not logged in.">
+        <span class="icon">💼</span> Авто-отклик на вакансии
+        <span class="badge popular">хит</span>
+      </button>
+      <button class="preset-btn" data-task="Extract all email addresses from this page and save them" data-context="Find all email addresses visible on the page. Format as a clean list.">
+        <span class="icon">📧</span> Извлечь email
+      </button>
+      <button class="preset-btn" data-task="Add all items to cart on this shopping page" data-context="Click 'Add to cart' for each product. Skip out-of-stock items.">
+        <span class="icon">🛒</span> Всё в корзину
+      </button>
+      <button class="preset-btn" data-task="Fill out this form with my information" data-context="Use my name, email, phone and other details from the context to fill all form fields.">
+        <span class="icon">📝</span> Заполнить форму
+      </button>
+      <button class="preset-btn" data-task="Take a screenshot of each section and summarize the page content" data-context="Scroll through the entire page, capturing key sections. Provide a structured summary.">
+        <span class="icon">📸</span> Скриншот и сводка
+      </button>
+      <button class="preset-btn" data-task="Monitor this page for changes and notify me when something updates" data-context="Check every 30 seconds for new content, price changes, or availability updates.">
+        <span class="icon">👁️</span> Мониторинг изменений
+        <span class="badge">новое</span>
+      </button>
+    </div>
+  </details>
+
+  <label for="task">Задача</label>
+  <textarea id="task" placeholder="Например: откликнуться на все вакансии, извлечь цены, заполнить форму..."></textarea>
+
+  <label for="context">Контекст (любые знания, которые важны для выполнения задачи)</label>
+  <textarea id="context" class="small" placeholder="Ваше имя, email, опыт, что писать в формах на сайтах..."></textarea>
+
+  <div class="row">
+    <div style="flex:2">
+      <label for="url">Стартовый URL (необязательно)</label>
+      <input id="url" type="text" placeholder="https://example.com/page" />
+    </div>
+    <div style="flex:1">
+      <label for="stepcap">Лимит шагов</label>
+      <input id="stepcap" type="number" min="1" max="2000" value="200" />
+    </div>
+  </div>
+
+  <label class="check"><input type="checkbox" id="dry" /> Тестовый режим (показать действия без выполнения)</label>
+
+  <div class="row">
+    <button id="start" class="primary">▶ Старт</button>
+    <button id="pause" class="warn" disabled>⏸ Пауза</button>
+    <button id="stop" class="danger" disabled>■ Стоп</button>
+  </div>
+  <div class="row">
+    <button id="export-html" class="export-btn">📥 HTML-отчёт</button>
+    <button id="export-api" class="ghost">📡 API-лог</button>
+  </div>
+  <div class="row">
+    <button id="monitor" class="ghost">📊 Монитор</button>
+    <button id="sidebar" class="ghost">🪟 Сайдбар</button>
+    <button id="toggle-widget" class="ghost">🔲 Виджет</button>
+  </div>
+  <div class="row">
+    <button id="logs" class="ghost">📜 Логи</button>
+    <button id="options" class="ghost">⚙ Настройки</button>
+  </div>
+
+  <div class="meta" id="meta">Шагов: 0 · Модель: —</div>
+
+  <!-- AI Thought Card - shows current AI thinking -->
+  <div class="ai-thought-card hidden" id="ai-thought-card">
+    <div class="ai-thought-header">ИИ рассуждает:</div>
+    <div class="ai-thought-text" id="ai-thought-text"></div>
+    <div class="ai-action-text hidden" id="ai-action-text"></div>
+  </div>
+
+  <!-- Phase indicator -->
+  <div class="phase-indicator" id="phase-indicator">
+    <div class="phase-bar">
+      <div class="phase-step" id="phase-execute" title="Executing"></div>
+      <div class="phase-step" id="phase-done" title="Done"></div>
+    </div>
+    <div class="phase-labels">
+      <span>Выполнение</span><span>Готово</span>
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WebClaw by ProTalk Monitor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1115;
+      color: #e6e8eb;
+      min-height: 100vh;
+      overflow-x: hidden;
+      width: 50vw;
+      min-width: 320px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      position: sticky; top: 0; z-index: 10;
+      background: #151820;
+      border-bottom: 1px solid #1f2330;
+      padding: 12px 16px;
+    }
+    .header-title {
+      font-size: 15px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #374151; }
+    .dot.idle    { background: #374151; }
+    .dot.working { background: #16a34a; box-shadow: 0 0 6px #16a34a; }
+    .dot.paused  { background: #ca8a04; box-shadow: 0 0 6px #ca8a04; }
+    .dot.error   { background: #dc2626; }
+
+    /* Stats bar */
+    .stats-bar {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .stat-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px;
+      background: #1a1d24;
+      border: 1px solid #2a2f3a;
+      border-radius: 12px;
+      font-size: 11px;
+      color: #9aa3af;
+    }
+    .stat-chip .val { color: #e6e8eb; font-weight: 600; }
+    .stat-chip.thinking { border-color: #6366f1; }
+    .stat-chip.thinking .val { color: #a5b4fc; }
+
+    /* Task display */
+    .task-display {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #9aa3af;
+      line-height: 1.3;
+      max-height: 40px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex; gap: 6px; margin-top: 8px;
+    }
+    .controls button {
+      padding: 4px 10px;
+      border: 1px solid #2a2f3a;
+      border-radius: 4px;
+      background: #1a1d24;
+      color: #e6e8eb;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .controls button:hover { background: #2a2f3a; }
+    .controls button.stop { border-color: #b91c1c; color: #fca5a5; }
+    .controls button.stop:hover { background: #3a1a1a; }
+    .controls button.pause { border-color: #ca8a04; color: #facc15; }
+
+    /* Filters */
+    .filters {
+      display: flex; gap: 4px; margin-top: 8px;
+    }
+    .filter-btn {
+      padding: 2px 8px;
+      border: 1px solid #2a2f3a;
+      border-radius: 10px;
+      background: transparent;
+      color: #6b7280;
+      font-size: 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .filter-btn.active {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: white;
+    }
+    .filter-btn:hover:not(.active) { border-color: #5b8def; color: #9aa3af; }
+
+    /* Timeline */
+    .timeline {
+      padding: 12px 12px 80px;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #6b7280;
+    }
+    .empty-state .emoji { font-size: 40px; margin-bottom: 12px; }
+    .empty-state p { font-size: 12px; margin-top: 6px; }
+
+    /* Step card */
+    .step-card {
+      background: #1a1d24;
+      border: 1px solid #1f2330;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .step-card:hover { border-color: #2a2f3a; }
+    .step-card.has-error { border-left: 3px solid #dc2626; }
+
+    .step-header {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .step-num {
+      font-weight: 700; color: #5b8def; font-size: 12px;
+      min-width: 28px;
+    }
+    .step-action-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .step-action-badge.click { background: #1e3a5f; color: #93c5fd; }
+    .step-action-badge.type { background: #1e3a2f; color: #86efac; }
+    .step-action-badge.scroll { background: #3a2f1e; color: #facc15; }
+    .step-action-badge.navigate { background: #2f1e3a; color: #c4b5fd; }
+    .step-action-badge.wait { background: #2a2f3a; color: #9aa3af; }
+    .step-action-badge.done { background: #1a3a1a; color: #86efac; }
+    .step-action-badge.fail { background: #3a1a1a; color: #fca5a5; }
+    .step-action-badge.other { background: #2a2f3a; color: #9aa3af; }
+    .step-action-badge.thinking { background: #2e1a4a; color: #c4b5fd; }
+    .step-action-badge.watchful-sleep { background: #1e3a5f; color: #7dd3fc; animation: wc-badge-pulse 2s ease-in-out infinite; }
+    .step-action-badge.deep-sleep { background: #2e1a4a; color: #a5b4fc; animation: wc-badge-pulse 2.5s ease-in-out infinite; }
+    .step-action-badge.wake-up { background: #064e3b; color: #86efac; }
+    .step-action-badge.wake-forced { background: rgba(250, 204, 21, 0.15); color: #facc15; }
+    @keyframes wc-badge-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .step-card.sleep-card { transition: border-color 0.3s, background 0.3s; }
+    .step-card.wake-card { transition: border-color 0.3s, background 0.3s; }
+    .sleep-wake-btn {
+      display: block; width: 100%; padding: 8px 0; margin-top: 8px;
+      font-size: 11px; font-weight: 600; color: #e6e8eb;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; cursor: pointer; text-align: center;
+      transition: all 0.15s ease;
+    }
+    .sleep-wake-btn:hover { background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3); color: #facc15; }
+    .step-time {
+      margin-left: auto;
+      font-size: 10px;
+      color: #6b7280;
+    }
+    .step-duration {
+      font-size: 10px;
+      color: #6b7280;
+    }
+
+    .step-body {
+      display: none;
+      padding: 0 10px 10px;
+    }
+    .step-body.open { display: block; }
+
+    /* Thought block */
+    .thought-block {
+      background: linear-gradient(135deg, #1e1040 0%, #2e1065 100%);
+      border-left: 3px solid #6366f1;
+      border-radius: 4px 8px 8px 4px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .thought-title {
+      font-size: 10px;
+      color: #818cf8;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .thought-content {
+      font-size: 12px;
+      color: #c4b5fd;
+      line-height: 1.5;
+      font-style: italic;
+    }
+
+    /* Observation badge */
+    .observation-badge {
+      font-size: 11px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .observation-badge.ok { background: #064e3b; color: #6ee7b7; }
+    .observation-badge.err { background: #7f1d1d; color: #fca5a5; }
+
+    /* Model thinking indicator */
+    .model-thinking {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 10px;
+      color: #a5b4fc;
+      font-size: 12px;
+    }
+    .thinking-dots {
+      display: flex; gap: 3px;
+    }
+    .thinking-dots span {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #6366f1;
+      animation: dot-pulse 1.2s ease-in-out infinite;
+    }
+    .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 0.3; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    /* Detail sections */
+    .detail {
+      margin-bottom: 6px;
+    }
+    .detail-label {
+      font-size: 10px;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 3px;
+    }
+    .detail pre {
+      background: #0b0d11;
+      border: 1px solid #1f2330;
+      border-radius: 4px;
+      padding: 6px 8px;
+      font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    /* Observation */
+    .observation {
+      padding: 4px 8px;
+      background: #11141b;
+      border-radius: 4px;
+      font-size: 11px;
+      color: #9aa3af;
+      margin-bottom: 6px;
+    }
+    .observation.ok { border-left: 2px solid #16a34a; }
+    .observation.err { border-left: 2px solid #dc2626; color: #fca5a5; }
+
+    /* Screenshot thumbnail */
+    .screenshot-thumb {
+      margin-top: 6px;
+      cursor: pointer;
+    }
+    .screenshot-thumb img {
+      width: 100%;
+      max-height: 180px;
+      object-fit: cover;
+      border: 1px solid #1f2330;
+      border-radius: 4px;
+      transition: border-color 0.2s;
+    }
+    .screenshot-thumb img:hover {
+      border-color: #5b8def;
+    }
+
+    /* Lightbox */
+    .lightbox {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.95);
+      z-index: 100;
+      cursor: zoom-out;
+      justify-content: center;
+      align-items: center;
+    }
+    .lightbox.active { display: flex; }
+    .lightbox img {
+      max-width: 98%; max-height: 98%;
+      object-fit: contain;
+    }
+
+    /* Token chart (mini sparkline) */
+    .token-chart {
+      margin-top: 8px;
+      height: 30px;
+      display: flex;
+      align-items: flex-end;
+      gap: 1px;
+    }
+    .token-bar {
+      flex: 1;
+      background: #2563eb;
+      border-radius: 1px 1px 0 0;
+      min-height: 1px;
+      opacity: 0.7;
+      transition: opacity 0.15s;
+    }
+    .token-bar:hover { opacity: 1; }
+
+    /* Navigation Map */
+    .nav-map-toggle {
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 12px;
+      margin: 8px 16px 0;
+      background: #1a1d24;
+      border: 1px solid #1f2330;
+      border-radius: 6px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 11px;
+      color: #9aa3af;
+      transition: all 0.15s;
+    }
+    .nav-map-toggle:hover { border-color: #2a2f3a; color: #e6e8eb; }
+    .nav-map-toggle .nav-count {
+      background: #2563eb;
+      color: white;
+      padding: 0 5px;
+      border-radius: 8px;
+      font-size: 9px;
+      font-weight: 700;
+      min-width: 16px;
+      text-align: center;
+    }
+    .nav-map-toggle .arrow {
+      margin-left: auto;
+      transition: transform 0.2s;
+      font-size: 10px;
+    }
+    .nav-map-toggle.expanded .arrow { transform: rotate(90deg); }
+
+    .nav-map-container {
+      display: none;
+      margin: 0 16px 8px;
+      background: #11141b;
+      border: 1px solid #1f2330;
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      padding: 8px 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .nav-map-container.open { display: block; }
+
+    .nav-map-empty {
+      text-align: center;
+      color: #6b7280;
+      font-size: 11px;
+      padding: 12px;
+    }
+
+    .nav-tree {
+      font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .nav-node {
+      padding: 3px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .nav-node .node-icon { flex-shrink: 0; width: 16px; text-align: center; }
+    .nav-node .node-id {
+      color: #5b8def;
+      font-weight: 600;
+      font-size: 10px;
+      min-width: 42px;
+    }
+    .nav-node .node-title {
+      color: #cbd5e1;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 220px;
+    }
+    .nav-node .node-title a {
+      color: #cbd5e1;
+      text-decoration: none;
+    }
+    .nav-node .node-title a:hover { color: #5b8def; text-decoration: underline; }
+    .nav-node .node-status {
+      font-size: 9px;
+      padding: 0 4px;
+      border-radius: 3px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .nav-node .node-status.active { background: #1e3a5f; color: #93c5fd; }
+    .nav-node .node-status.explored { background: #1a3a1a; color: #86efac; }
+    .nav-node .node-status.promising { background: #2e1a4a; color: #c4b5fd; }
+    .nav-node .node-status.dead_end { background: #3a1a1a; color: #fca5a5; }
+    .nav-node.is-current {
+      background: #1a1d24;
+      border-radius: 4px;
+      padding: 4px 6px;
+      margin: 0 -6px;
+      border: 1px solid #2563eb33;
+    }
+    .nav-node .node-summary {
+      font-size: 10px;
+      color: #6b7280;
+      font-style: italic;
+      margin-left: 20px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 250px;
+    }
+    .nav-legend {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid #1f2330;
+      font-size: 10px;
+      color: #6b7280;
+    }
+    .nav-legend span { display: inline-flex; align-items: center; gap: 2px; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">
+      <span>🦞</span>
+      <span class="dot" id="dot"></span>
+      <span>WebClaw by ProTalk Monitor</span>
+    </div>
+
+    <div class="stats-bar" id="stats-bar">
+      <div class="stat-chip">Шаг: <span class="val" id="stat-step">0</span></div>
+      <div class="stat-chip">🪙 <span class="val" id="stat-tokens">0</span></div>
+      <div class="stat-chip thinking" id="stat-thinking" style="display:none">
+        💭 <span class="val" id="stat-thinking-time">0с</span>
+      </div>
+    </div>
+
+    <div class="task-display" id="task-display">Нет активной задачи</div>
+
+    <div class="controls">
+      <button class="pause" id="btn-pause" style="display:none">⏸ Пауза</button>
+      <button class="stop" id="btn-stop" style="display:none">■ Стоп</button>
+    </div>
+
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">Все</button>
+      <button class="filter-btn" data-filter="thought">💭 Мысли</button>
+      <button class="filter-btn" data-filter="action">🎯 Действия</button>
+      <button class="filter-btn" data-filter="error">❌ Ошибки</button>
+    </div>
+  </div>
+
+  <!-- Token chart -->
+  <div style="padding: 8px 16px 0;">
+    <div class="token-chart" id="token-chart"></div>
+  </div>
+
+  <!-- Navigation Map -->
+  <div class="nav-map-toggle" id="nav-map-toggle" style="display:none" onclick="toggleNavMap()">
+    <span>🧭</span>
+    <span>Карта навигации</span>
+    <span class="nav-count" id="nav-count">0</span>
+    <span class="arrow">▶</span>
+  </div>
+  <div class="nav-map-container" id="nav-map-container">
+    <div class="nav-map-empty" id="nav-map-empty">Нет посещённых страниц</div>
+    <div class="nav-tree" id="nav-tree"></div>
+    <div class="nav-legend">
+      <span>📍 текущая</span>
+      <span>✅ изучена</span>
+      <span>🔮 перспективная</span>
+      <span>❌ тупик</span>
+      <span>🌐 хаб</span>
+      <span>📄 страница</span>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline" id="timeline">
+    <div class="empty-state" id="empty-state">
+      <div class="emoji">🦞</div>
+      <div>Агент не запущен</div>
+      <p>Запустите задачу из popup, чтобы увидеть ход работы здесь</p>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" onclick="this.classList.remove('active')">
+    <img id="lightbox-img" src="" alt="Screenshot">
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

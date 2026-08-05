@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "WebClaw",
+  "version": "7.0.0",
+  "description": "An autonomous AI agent that drives any website by sight. Uses Chrome DevTools Protocol for trusted events and background screenshots. Vision-First architecture: screenshot → AI model → coordinate-based actions. No DOM parsing needed.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "alarms",
+    "webNavigation",
+    "debugger",
+    "downloads",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "WebClaw — AI Browser Agent",
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon_16.png",
+      "48": "icons/icon_48.png",
+      "128": "icons/icon_128.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
+  },
+  "commands": {
+    "toggle": {
+      "suggested_key": { "default": "Alt+Shift+A" },
+      "description": "Start or stop the agent"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/logs.html", "src/sidepanel.html"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/overlay_widget.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon_16.png",
+    "48": "icons/icon_48.png",
+    "128": "icons/icon_128.png"
+  }
+}

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>WebClaw by ProTalk — логи</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #0b0d11; color: #cbd5e1;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; height: 100%; }
+    header { display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+      background: #11141b; border-bottom: 1px solid #1f2330; }
+    header b { color: #e6e8eb; }
+    header .spacer { flex: 1; }
+    header button { background: #2a2f3a; color: #e6e8eb; border: 0; padding: 5px 9px; border-radius: 4px; cursor: pointer; }
+    main { padding: 8px 12px; overflow: auto; height: calc(100% - 40px); }
+    .row { padding: 2px 0; border-bottom: 1px dashed #1f2330; }
+    .row.err { color: #fca5a5; }
+    .row.ok  { color: #86efac; }
+    .row.act { color: #93c5fd; }
+    .row .ts { color: #6b7280; margin-right: 8px; }
+    .filter { background: #1a1d24; color: #e6e8eb; border: 1px solid #2a2f3a; border-radius: 4px; padding: 4px 6px; font: inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <b>WebClaw by ProTalk</b>
+    <span id="status">ожидание</span>
+    <span class="spacer"></span>
+    <input class="filter" id="filter" placeholder="фильтр..." />
+    <button id="pause">Пауза авто-скролла</button>
+    <button id="clear">Очистить</button>
+  </header>
+  <main id="main"></main>
+  <script src="logs.js"></script>
+</body>
+</html>

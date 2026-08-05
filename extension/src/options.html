@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>ProTalk Chrome Claw — Настройки</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      max-width: 640px;
+      margin: 32px auto;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1115;
+      color: #e6e8eb;
+      padding: 24px;
+    }
+    h1 { font-size: 18px; margin: 0 0 6px; }
+    p.sub { color: #9aa3af; margin: 0 0 24px; font-size: 13px; }
+    label { display: block; font-size: 12px; color: #9aa3af; margin: 16px 0 6px; }
+    input, select, textarea {
+      width: 100%;
+      padding: 9px 10px;
+      background: #1a1d24;
+      color: #e6e8eb;
+      border: 1px solid #2a2f3a;
+      border-radius: 6px;
+      font: inherit;
+    }
+    textarea { min-height: 100px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #5b8def; }
+    .row { display: flex; gap: 8px; margin-top: 20px; }
+    button {
+      padding: 9px 14px;
+      border: 0; border-radius: 6px;
+      font: inherit; cursor: pointer;
+      background: #2a2f3a; color: #e6e8eb;
+    }
+    button.primary { background: #2563eb; }
+    button.primary:hover { background: #1d4fd1; }
+    .status { margin-top: 14px; font-size: 12px; color: #9aa3af; min-height: 18px; }
+    .status.ok  { color: #86efac; }
+    .status.err { color: #fca5a5; }
+    .hint { font-size: 11px; color: #6b7280; margin-top: 4px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    h2 { font-size: 14px; margin: 24px 0 4px; color: #cbd5e1; }
+    .check-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; margin: 8px 0;
+      background: #11141b; border: 1px solid #1f2330; border-radius: 6px;
+    }
+    .check-row input[type="checkbox"] { width: auto; }
+    .check-label { flex: 1; }
+    .check-label .title { font-size: 13px; color: #e6e8eb; }
+    .check-label .desc { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .provider-section { transition: opacity 0.2s; }
+    .provider-section.hidden { display: none; }
+    a.register-link {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 6px 12px; margin: 8px 0 4px;
+      background: #1a1d24; border: 1px solid #2563eb; border-radius: 6px;
+      color: #5b8def; font-size: 12px; text-decoration: none;
+    }
+    a.register-link:hover { background: #1e2a3a; border-color: #5b8def; }
+  </style>
+</head>
+<body>
+  <h1>WebClaw by ProTalk — настройки</h1>
+  <p class="sub">Подключение к AI-модели + параметры поведения агента.</p>
+
+  <h2>Подключение</h2>
+
+  <label for="provider">Провайдер</label>
+  <select id="provider">
+    <option value="protalk">ProTalk Async Router</option>
+    <!--<option value="openai">OpenAI / OpenRouter (прямой API)</option>
+    <option value="anthropic">Anthropic (Claude)</option>
+    <option value="ollama">Ollama (локальный)</option>-->
+  </select>
+  <div class="hint">Выберите способ подключения к AI-модели.</div>
+
+  <!-- ProTalk-only fields -->
+  <div id="protalk_fields" class="provider-section">
+    <label for="auth_token">Auth Token</label>
+    <input id="auth_token" type="password" autocomplete="off" placeholder="23141_xxxxxxxxxxxxxxxx" />
+    <div class="hint">Bearer-токен для ProTalk Async Router.</div>
+
+    <label for="user_email">User Email</label>
+    <input id="user_email" type="email" autocomplete="off" placeholder="you@example.com" />
+    <div class="hint">Email, привязанный к аккаунту ProTalk.</div>
+
+    <label for="model_protalk">Модель</label>
+    <select id="model_protalk">
+      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
+      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
+      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
+      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
+      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
+      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
+      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
+      <option value="meta-llama/llama-3.2-90b-vision-instruct">meta-llama/llama-3.2-90b-vision-instruct</option>
+      <option value="__custom__">Другая (ввести вручную)...</option>
+    </select>
+    <input id="model_protalk_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
+    <div class="hint">Модель, которая будет использоваться через ProTalk Async Router.</div>
+
+    <a class="register-link" href="https://account.pro-talk.ru/login#register" target="_blank">
+      🔗 Получить аккаунт ProTalk
+    </a>
+  </div>
+
+  <!-- Non-protalk fields (OpenAI, Anthropic, Ollama) -->
+  <div id="non_protalk_fields" class="provider-section hidden">
+    <label for="api_base_url">API Base URL (опционально)</label>
+    <input id="api_base_url" type="url" autocomplete="off" placeholder="https://openrouter.ai/api/v1 или http://localhost:11434" />
+    <div class="hint">Для OpenRouter: https://openrouter.ai/api/v1. Для Ollama: http://localhost:11434. По умолчанию используется стандартный endpoint провайдера.</div>
+
+    <label for="auth_token2">Auth Token</label>
+    <input id="auth_token2" type="password" autocomplete="off" placeholder="23141_xxxxxxxxxxxxxxxx" />
+    <div class="hint">Bearer-токен. Для OpenAI/Anthropic можно использовать API Key ниже.</div>
+
+    <label for="api_key">API Key (для прямых провайдеров)</label>
+    <input id="api_key" type="password" autocomplete="off" placeholder="sk-..." />
+    <div class="hint">API ключ для OpenAI, OpenRouter, Anthropic.</div>
+
+    <label for="model">Модель</label>
+    <select id="model">
+      
+      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
+      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
+      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
+      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
+      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
+      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
+      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
+
+      <option value="meta-llama/llama-3.2-90b-vision-instruct">meta-llama/llama-3.2-90b-vision-instruct</option>
+      <option value="__custom__">Другая (ввести вручную)...</option>
+    </select>
+    <input id="model_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
+
+    <div class="grid2">
+      <div>
+        <label for="temperature">Temperature</label>
+        <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.2" />
+      </div>
+      <div>
+        <label for="reasoning">Уровень рассуждений</label>
+        <select id="reasoning">
+          <option value="low">низкий</option>
+          <option value="medium">средний</option>
+          <option value="high">высокий</option>
+        </select>
+      </div>
+    </div>
+
+    <label for="step_cap">Лимит шагов по умолчанию</label>
+    <input id="step_cap" type="number" min="1" max="2000" value="200" />
+  </div>
+
+  <h2>Режимы ввода и обхода защит</h2>
+
+  <div class="check-row">
+    <input type="checkbox" id="cdp_input_mode" />
+    <div class="check-label">
+      <div class="title">🔒 CDP-режим ввода (рекомендуется)</div>
+      <div class="desc">Использовать Chrome DevTools Protocol для генерации isTrusted:true событий кликов и ввода. Обходит анти-бот проверки.</div>
+    </div>
+  </div>
+
+  <h2>Стабилизация SPA</h2>
+
+  <div class="grid2">
+    <div>
+      <label for="spa_network_idle_ms">Network Idle (мс)</label>
+      <input id="spa_network_idle_ms" type="number" min="100" max="5000" step="100" value="500" />
+      <div class="hint">Ожидание отсутствия XHR/Fetch перед следующим шагом.</div>
+    </div>
+    <div>
+      <label for="spa_dom_stable_ms">DOM Stable (мс)</label>
+      <input id="spa_dom_stable_ms" type="number" min="50" max="3000" step="50" value="300" />
+      <div class="hint">Ожидание отсутствия мутаций DOM.</div>
+    </div>
+  </div>
+
+  <h2>Viewport агента</h2>
+  <div class="hint">Размер viewport для предсказуемого разрешения скриншотов AI.</div>
+
+  <div class="grid2">
+    <div>
+      <label for="agent_viewport_width">Ширин�� viewport (px)</label>
+      <input id="agent_viewport_width" type="number" min="320" max="3840" step="10" value="1280" />
+    </div>
+    <div>
+      <label for="agent_viewport_height">Высота viewport (px)</label>
+      <input id="agent_viewport_height" type="number" min="240" max="2160" step="10" value="800" />
+    </div>
+  </div>
+
+  <h2>Контекст пользователя</h2>
+  <label for="user_context">Резюме / контакты / шаблоны сопроводительных</label>
+  <textarea id="user_context" placeholder="Иван Петров, Frontend, 5 лет. Telegram @ivan_p. Сопроводительное: кратко, по делу, упоминать стек..."></textarea>
+  <div class="hint">Этот текст автоматически подмешивается в system-prompt при каждом вызове модели.</div>
+
+  <h2>Бюджет токенов</h2>
+  <label for="token_limit">Лимит токенов за сессию (обязательно)</label>
+  <input id="token_limit" type="number" min="1000" max="50000000" step="10000" value="1000000" required />
+  <div class="hint">
+    Максимальное количество токенов за одну сессию. При достижении лимита агент будет автоматически остановлен.
+    Минимум: 1 000, по умолчанию: 1 000 000. Учитывается общий расход всех вызовов модели.
+  </div>
+
+  <h2>Экспорт / Импорт конфига</h2>
+  <div class="hint">Скачайте текущие настройки в JSON-файл или загрузите ранее сохранённый. Auth Token экспортируется для удобства переноса настроек.</div>
+  <div class="row" style="margin-top: 12px;">
+    <button id="export_config">📥 Экспорт в JSON</button>
+    <button id="import_config">📤 Импорт из JSON</button>
+    <input type="file" id="import_file" accept=".json" style="display:none;" />
+  </div>
+
+  <h2>Удалённый конфиг (переживает переустановку)</h2>
+  <label for="remote_config_url">URL JSON-конфига (например, raw GitHub Gist)</label>
+  <input id="remote_config_url" type="url" placeholder="https://gist.githubusercontent.com/&lt;user&gt;/&lt;gist&gt;/raw/protalk-claw.json" />
+  <div class="hint">
+    Создай публичный <b>Gist</b> с файлом (например, <code>protalk-claw.json</code>) и вставь сюда raw-URL. Содержимое Gist переживает удаление и переустановку расширения.
+    Пример JSON: <code>{"user_email":"...","model":"openai/gpt-4o","user_context":"..."}</code>.
+    Локальные поля имеют приоритет: если поле уже заполнено в форме, оно не перезаписывается.
+    <b>⚠️ Никогда не включайте api_key в Gist!</b> Секреты хранятся только локально.
+  </div>
+  <div class="row">
+    <button id="fetch_remote">⤓ Загрузить из URL</button>
+    <button id="show_gist_format" class="ghost">Показать шаблон JSON</button>
+  </div>
+  <pre id="gist_template" style="display:none; margin-top:8px; padding:10px; background:#0b0d11; border:1px solid #1f2330; border-radius:6px; font-size:11px; color:#cbd5e1; white-space:pre-wrap;">{
+  "user_email": "you@example.com",
+  "provider": "openai",
+  "api_base_url": "https://openrouter.ai/api/v1",
+  "model": "openai/gpt-4o",
+  "temperature": 0.2,
+  "reasoning": "low",
+  "step_cap": 200,
+  "user_context": "Имя, контакты, что писать в сопроводительном...",
+  "cdp_input_mode": false,
+  "spa_network_idle_ms": 500,
+  "spa_dom_stable_ms": 300,
+  "agent_viewport_width": 1280,
+  "agent_viewport_height": 800,
+  "token_limit": 1000000
+}
+⚠️ НЕ включайте api_key в Gist!
+Auth Token экспортируется для удобства переноса настроек.</pre>
+
+  <div class="row">
+    <button id="save" class="primary">Сохранить</button>
+    <button id="test">Проверить соединение</button>
+  </div>
+  <div class="status" id="status"></div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

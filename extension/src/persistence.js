@@ -82,6 +82,9 @@ export async function saveState(runtime, memory) {
     // Deep sleep alarm name (for tracking active hibernation alarm after SW wake)
     deepSleepAlarmName: runtime._deepSleepAlarmName || null,
 
+    // Model timeout counter for adaptive prompt reduction
+    modelTimeoutCount: runtime._modelTimeoutCount || 0,
+
     // Log buffer (for UI restoration after SW wake)
     logBuffer: runtime._logBuffer ? runtime._logBuffer.slice(-runtime._logBufferMax) : []
   };

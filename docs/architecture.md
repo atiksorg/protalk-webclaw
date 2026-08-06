@@ -166,6 +166,45 @@ GET https://ai.pro-talk.ru/api/async/router/{taskId}
 - **Zero-RAM Hibernation**: Exploiting MV3's ephemeral Service Workers as a feature rather than a bug, allowing the agent to wait hours without consuming user memory.
 - **Select Probing**: Using `document.elementFromPoint` before a physical click to detect `<select>` elements and extract their options directly, bypassing the need for the AI to "see" the OS-level dropdown menu.
 
+### Anti-Blink Architecture (v9.2)
+
+When interacting with modern custom dropdowns (built with `<div>` instead of native `<select>`), the agent faces a timing problem: the dropdown opens beautifully, but by the time the agent waits for network idle and DOM stability to take a screenshot, the dropdown has already closed (often due to `mouseleave` events). The Anti-Blink system solves this with two complementary techniques:
+
+#### 1. Mouse Parking
+After every CDP click, the cursor is "parked" at the click coordinates with a final `mouseMoved` event. This prevents `mouseleave` events from firing on custom dropdowns/menus, keeping them open long enough for the agent to screenshot the expanded state.
+
+```
+cdpClick(x, y):
+  mouseMoved(x, y) → mousePressed → mouseReleased → sleep(10ms) → mouseMoved(x, y)  // park!
+```
+
+The runtime stores the parked coordinates in `runtime._mouseParkCoords` so other modules know where the cursor is.
+
+#### 2. Fast-Track Screenshot Mode
+After UI interactions (click, hover, select, checkbox) that don't trigger navigation, the agent enters "fast-track mode" for the next screenshot. This mode skips:
+- Network idle detection (analytics/ads don't matter for UI state)
+- DOM stability check (mutations are expected during animations)
+
+Instead, it only waits for:
+- `document.readyState >= 'interactive'` (≤1 second)
+- A small configurable delay (`fast_track_delay_ms`, default 100ms) for CSS transitions to settle
+
+This allows the agent to "photograph" the expanded dropdown menu before it closes, typically within ~120ms of the click.
+
+**Flow:**
+```
+click_at(x, y) → _fastTrackMode = true
+  ↓
+Next iteration: waitPageReadyFast() instead of waitPageReady()
+  ↓
+Screenshot captured while dropdown is still open!
+  ↓
+AI sees the options and can click_at the correct one
+```
+
+**Settings:**
+- `fast_track_delay_ms` (default: 100ms): Delay after paint for CSS transitions to settle. Lower values capture UI faster but may miss slow animations.
+
 ## Session Logging & HTML Reports
 
 ### Overview

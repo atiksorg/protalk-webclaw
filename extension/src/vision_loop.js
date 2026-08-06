@@ -14,8 +14,8 @@
 
 import { getSettings } from './settings.js';
 import { callModelWithBackoff } from './providers.js';
-import { runtime, sleep, broadcast, STEP_CAP_DEFAULT, STEP_DELAY_MS, MAX_HISTORY, setIconMode } from './bus.js';
-import { waitPageReady, captureScreenshot } from './cdp.js';
+import { runtime, sleep, broadcast, STEP_CAP_DEFAULT, STEP_DELAY_MS, MAX_HISTORY, setIconMode, MODEL_TIMEOUT_MS } from './bus.js';
+import { waitPageReady, waitPageReadyFast, captureScreenshot } from './cdp.js';
 import { executeVisionTool, executeActionChain } from './vision_tools.js';
 import {
   VISION_SYSTEM_PROMPT,
@@ -83,6 +83,7 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
   // Visual stagnation tracking
   let prevScreenshotHash = '';
   let consecutiveSameScreen = 0;
+  let lastOverlayHint = '';
 
   try {
     while (!runtime.abortFlag && runtime.step < stepCap) {
@@ -98,9 +99,17 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
       broadcast({ kind: 'step_start', step: runtime.step });
 
       // 0) Wait for page readiness
+      // ANTI-BLINK: Use fast-track mode after UI interactions (click/hover)
+      // to capture dynamic elements (dropdowns, menus) before they disappear
       broadcast({ kind: 'infra', text: '⏳ Ожидание готовности страницы...' });
       try {
-        await waitPageReady();
+        if (runtime._fastTrackMode) {
+          broadcast({ kind: 'infra', text: '⚡ Fast-track: пропуск network idle для захвата UI...' });
+          await waitPageReadyFast();
+          runtime._fastTrackMode = false; // Reset after use
+        } else {
+          await waitPageReady();
+        }
         broadcast({ kind: 'infra', text: '✅ Страница готова' });
       } catch (e) {
         broadcast({ kind: 'log', level: 'error', text: 'waitPageReady failed: ' + e.message });
@@ -155,16 +164,22 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
       } catch (_) {}
 
       // 4) Build vision prompt
+      // ADAPTIVE: If we've had 3+ consecutive model timeouts, reduce history
+      // to shrink the prompt and increase the chance of a fast response.
+      const effectiveHistory = runtime._reducedHistoryMode
+        ? runtime.history.slice(-3)
+        : runtime.history;
       const hasMemoryContent = memory.scratchpad.length > 0 || memory.navTree.length > 0;
       const userMessage = buildVisionPrompt({
         task: runtime.task,
         userContext: runtime.context,
         currentUrl,
         pageTitle,
-        history: runtime.history,
+        history: effectiveHistory,
         step: runtime.step,
         consecutiveSame: consecutiveSameScreen,
-        taskMemoryContext: hasMemoryContent ? memory.toPromptContext() : ''
+        taskMemoryContext: hasMemoryContent ? memory.toPromptContext() : '',
+        overlayHint: lastOverlayHint
       });
 
       // 5) Call model with screenshot
@@ -182,6 +197,55 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
         modelText = out.content;
         const modelDuration = Date.now() - modelCallStart;
         broadcast({ kind: 'model_call_end', step: runtime.step, duration: modelDuration, tokensUsed: out.tokensUsed || 0 });
+
+        // ============================================================
+        // SW SURVIVAL: Handle model timeout gracefully
+        // ============================================================
+        if (out.timedOut) {
+          runtime._modelTimeoutCount++;
+          broadcast({
+            kind: 'log',
+            level: 'warn',
+            text: `⏱️ Model timeout #${runtime._modelTimeoutCount} — saving state and continuing (SW survival)`
+          });
+
+          // Record timeout in history so the model knows what happened on next attempt
+          runtime.history.push({
+            action: '[СИСТЕМА] Таймаут модели',
+            observation: `Модель не ответила за ${MODEL_TIMEOUT_MS / 1000}сек. Это таймаут #${runtime._modelTimeoutCount}. Сохраняю состояние и перехожу к следующей попытке.`
+          });
+          if (runtime.history.length > MAX_HISTORY) {
+            runtime.history.splice(0, runtime.history.length - MAX_HISTORY);
+          }
+
+          // Persist state immediately — the SW may be killed soon
+          await saveState(runtime, memory);
+
+          // Adaptive response: escalating severity based on consecutive timeouts
+          if (runtime._modelTimeoutCount >= 5) {
+            broadcast({ kind: 'log', level: 'error', text: '❌ 5+ consecutive model timeouts — aborting (persistent_model_timeout)' });
+            runtime.running = false;
+            await setIconMode('error');
+            return { ok: false, reason: 'persistent_model_timeout', steps: runtime.step };
+          }
+          if (runtime._modelTimeoutCount >= 3) {
+            broadcast({
+              kind: 'log',
+              level: 'warn',
+              text: `⚠️ ${runtime._modelTimeoutCount} consecutive timeouts — reducing prompt complexity for next attempt`
+            });
+            // Hint for the next iteration: use reduced history
+            runtime._reducedHistoryMode = true;
+          }
+
+          await sleep(STEP_DELAY_MS);
+          continue; // Skip to next iteration — retry the model call
+        }
+
+        // Model responded successfully — reset timeout counter
+        runtime._modelTimeoutCount = 0;
+        runtime._reducedHistoryMode = false;
+
         if (out.tokensUsed) {
           runtime.totalTokensUsed += out.tokensUsed;
           if (sessionLogger) sessionLogger.logTokens(out.tokensUsed);
@@ -263,8 +327,24 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
         } else {
           observation = await executeVisionTool(action);
         }
+
+        // ANTI-BLINK: Enable fast-track mode for UI interactions (click, hover, select)
+        // This tells the next iteration to skip network idle wait and capture
+        // the screenshot immediately while dropdowns/menus are still open
+        const isUIInteraction = ['click_at', 'hover_at', 'select_at', 'checkbox_at'].includes(action.tool);
+        const causedNavigation = observation?.ok && action.tool === 'navigate';
+
+        if (isUIInteraction && !causedNavigation) {
+          runtime._fastTrackMode = true;
+          runtime._lastActionTool = action.tool;
+          broadcast({ kind: 'log', text: `⚡ Fast-track enabled for next screenshot (after ${action.tool})` });
+        } else {
+          runtime._fastTrackMode = false;
+          runtime._lastActionTool = action.tool;
+        }
       } catch (e) {
         observation = { ok: false, error: e.message };
+        runtime._fastTrackMode = false;
       }
 
       // 8a) Deep sleep check — if agent entered hibernation, STOP the loop.
@@ -286,6 +366,13 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
       }
 
       broadcast({ kind: 'observation', step: runtime.step, observation });
+
+      // Track overlay blockage for the next step's prompt
+      if (!observation.ok && observation.error === 'overlay_blocked') {
+        lastOverlayHint = observation.hint || '';
+      } else {
+        lastOverlayHint = ''; // Clear if no blockage
+      }
 
       // 8b) Auto-track navigation: if URL changed after action, create/update nav nodes
       if (observation.ok && action.tool !== 'jump_to_node') {

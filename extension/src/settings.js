@@ -51,6 +51,11 @@ const KEY_SLEEP_MAX_DURATION = 'sleep_max_duration_ms';
 // v9.1 Deep sleep (hibernation)
 const KEY_DEEP_SLEEP_POLL_INTERVAL = 'deep_sleep_poll_interval_ms';
 const KEY_DEEP_SLEEP_MAX_DURATION = 'deep_sleep_max_duration_ms';
+// v9.2 Anti-Blink (fast-track for custom dropdowns)
+const KEY_FAST_TRACK_DELAY = 'fast_track_delay_ms';
+// v9.3 Human-like mouse movement (Bezier interpolation)
+const KEY_MOUSE_MOVE_JITTER = 'mouse_move_jitter';
+const KEY_MOUSE_MOVE_BASE_DELAY = 'mouse_move_base_delay';
 
 const DEFAULTS = {
   auth_token: '',
@@ -89,7 +94,12 @@ const DEFAULTS = {
   sleep_max_duration_ms: 300000,  // Maximum sleep duration before forced wake (5 min)
   // v9.1 Deep sleep (hibernation)
   deep_sleep_poll_interval_ms: 5000,  // Interval between screenshots during watchful sleep (ms)
-  deep_sleep_max_duration_ms: 86400000 // Maximum deep sleep duration (24 hours)
+  deep_sleep_max_duration_ms: 86400000, // Maximum deep sleep duration (24 hours)
+  // v9.2 Anti-Blink (fast-track for custom dropdowns)
+  fast_track_delay_ms: 100,  // Delay after paint for CSS transitions to settle (ms)
+  // v9.3 Human-like mouse movement (Bezier interpolation)
+  mouse_move_jitter: 1.5,      // Random deviation per step in pixels (hand tremor simulation)
+  mouse_move_base_delay: 10    // Base delay between path points in ms
 };
 
 function readSync() {
@@ -132,7 +142,12 @@ function readSync() {
         sleep_max_duration_ms: typeof items[KEY_SLEEP_MAX_DURATION] === 'number' ? items[KEY_SLEEP_MAX_DURATION] : DEFAULTS.sleep_max_duration_ms,
         // v9.1 Deep sleep (hibernation)
         deep_sleep_poll_interval_ms: typeof items[KEY_DEEP_SLEEP_POLL_INTERVAL] === 'number' ? items[KEY_DEEP_SLEEP_POLL_INTERVAL] : DEFAULTS.deep_sleep_poll_interval_ms,
-        deep_sleep_max_duration_ms: typeof items[KEY_DEEP_SLEEP_MAX_DURATION] === 'number' ? items[KEY_DEEP_SLEEP_MAX_DURATION] : DEFAULTS.deep_sleep_max_duration_ms
+        deep_sleep_max_duration_ms: typeof items[KEY_DEEP_SLEEP_MAX_DURATION] === 'number' ? items[KEY_DEEP_SLEEP_MAX_DURATION] : DEFAULTS.deep_sleep_max_duration_ms,
+        // v9.2 Anti-Blink (fast-track for custom dropdowns)
+        fast_track_delay_ms: typeof items[KEY_FAST_TRACK_DELAY] === 'number' ? items[KEY_FAST_TRACK_DELAY] : DEFAULTS.fast_track_delay_ms,
+        // v9.3 Human-like mouse movement (Bezier interpolation)
+        mouse_move_jitter: typeof items[KEY_MOUSE_MOVE_JITTER] === 'number' ? items[KEY_MOUSE_MOVE_JITTER] : DEFAULTS.mouse_move_jitter,
+        mouse_move_base_delay: typeof items[KEY_MOUSE_MOVE_BASE_DELAY] === 'number' ? items[KEY_MOUSE_MOVE_BASE_DELAY] : DEFAULTS.mouse_move_base_delay
       });
     });
   });
@@ -243,6 +258,13 @@ export function setSettings(partial) {
     // v9.1 Deep sleep (hibernation)
     if (partial.deep_sleep_poll_interval_ms !== undefined) syncPatch[KEY_DEEP_SLEEP_POLL_INTERVAL] = Math.max(2000, Math.min(60000, partial.deep_sleep_poll_interval_ms));
     if (partial.deep_sleep_max_duration_ms !== undefined) syncPatch[KEY_DEEP_SLEEP_MAX_DURATION] = Math.max(60000, Math.min(172800000, partial.deep_sleep_max_duration_ms));
+
+    // v9.2 Anti-Blink (fast-track for custom dropdowns)
+    if (partial.fast_track_delay_ms !== undefined) syncPatch[KEY_FAST_TRACK_DELAY] = Math.max(0, Math.min(500, partial.fast_track_delay_ms));
+
+    // v9.3 Human-like mouse movement (Bezier interpolation)
+    if (partial.mouse_move_jitter !== undefined) syncPatch[KEY_MOUSE_MOVE_JITTER] = Math.max(0, Math.min(10, partial.mouse_move_jitter));
+    if (partial.mouse_move_base_delay !== undefined) syncPatch[KEY_MOUSE_MOVE_BASE_DELAY] = Math.max(0, Math.min(50, partial.mouse_move_base_delay));
 
     // Write both stores in parallel
     let done = 0;

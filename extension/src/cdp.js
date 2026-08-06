@@ -7,6 +7,7 @@
 
 import { runtime, sleep, broadcast, CDP_VERSION } from './bus.js';
 import { getSettings } from './settings.js';
+import { generateMousePath } from './bus.js';
 
 // ============================================================
 // CDP LIFECYCLE
@@ -61,6 +62,8 @@ export async function cdpDetach() {
   } catch (_) {}
   runtime.cdpAttached = false;
   runtime.cdpTarget = null;
+  // Cursor position becomes unknown after detach
+  _lastMousePos = null;
 }
 
 /** Send a CDP command and return the result. */
@@ -83,18 +86,122 @@ export async function cdpSend(method, params = {}) {
 }
 
 // ============================================================
+// MOUSE POSITION TRACKING
+// ============================================================
+
+// Track the last known cursor position so we can move FROM it.
+// null = unknown (first move in session, or after SW wake).
+let _lastMousePos = null;
+
+/**
+ * Reset mouse position tracking (e.g. on session start or tab switch).
+ * The next cdpMoveMouse/cdpClick/cdpHover will use a short random start
+ * position instead of interpolating from a stale point.
+ */
+export function resetMousePosition() {
+  _lastMousePos = null;
+}
+
+/**
+ * Move the mouse cursor from its current position to (targetX, targetY)
+ * along a human-like Bezier curve with jitter and easing.
+ *
+ * Dispatches 15–20 CDP Input.dispatchMouseEvent(mouseMoved) commands
+ * with micro-delays between them. This creates a natural movement
+ * trajectory that anti-bot systems cannot distinguish from a real human.
+ *
+ * If the current cursor position is unknown (first move or after SW wake),
+ * the cursor starts from a random point within ~200px of the target.
+ *
+ * @param {number} targetX — destination X in viewport pixels
+ * @param {number} targetY — destination Y in viewport pixels
+ * @param {Object} [opts] — optional overrides (steps, jitter, curvature, baseDelay)
+ */
+export async function cdpMoveMouse(targetX, targetY, opts) {
+  // Determine start position
+  let startX, startY;
+  if (_lastMousePos) {
+    startX = _lastMousePos.x;
+    startY = _lastMousePos.y;
+  } else {
+    // First move in session: start from a random nearby point to avoid
+    // the "teleport from (0,0)" tell. Place cursor ~100-200px from target
+    // at a random angle — simulates a cursor that was "already somewhere on screen".
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 100 + Math.random() * 150;
+    startX = Math.round(targetX + Math.cos(angle) * dist);
+    startY = Math.round(targetY + Math.sin(angle) * dist);
+  }
+
+  // Compute distance — if very close (< 5px), just send one move event
+  const dx = targetX - startX;
+  const dy = targetY - startY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  if (distance < 5) {
+    // Already at target — just one precise mouseMoved
+    await cdpSend('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: targetX, y: targetY, button: 'none', clickCount: 0
+    });
+    _lastMousePos = { x: targetX, y: targetY };
+    return;
+  }
+
+  // Generate the human-like Bezier path
+  const settings = await getSettings().catch(() => ({}));
+  const pathOpts = {
+    jitter: (settings.mouse_move_jitter != null) ? settings.mouse_move_jitter : 1.5,
+    baseDelay: (settings.mouse_move_base_delay != null) ? settings.mouse_move_base_delay : 10,
+    ...opts // caller overrides take priority
+  };
+
+  const path = generateMousePath(startX, startY, targetX, targetY, pathOpts);
+
+  // Dispatch each point as a CDP mouseMoved event
+  for (const point of path) {
+    if (point.delay > 0) {
+      await sleep(point.delay);
+    }
+    try {
+      await cdpSend('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: point.x,
+        y: point.y,
+        button: 'none',
+        clickCount: 0
+      });
+    } catch (_) {
+      // Non-fatal: CDP may have detached mid-movement
+      break;
+    }
+  }
+
+  // Update position tracker
+  _lastMousePos = { x: targetX, y: targetY };
+}
+
+// ============================================================
 // CDP-BASED ACTIONS (trusted events via chrome.debugger)
 // ============================================================
 
 /**
  * Perform a trusted click via CDP Input.dispatchMouseEvent.
  * This generates isTrusted:true events that bypass anti-bot checks.
+ *
+ * HUMAN-LIKE: First moves the cursor along a Bezier curve to the target
+ * coordinates, simulating natural hand movement. Then performs the
+ * click (press + release) at the precise target point.
+ *
+ * ANTI-BLINK: After the click sequence, the cursor is "parked" at the
+ * click coordinates (a final mouseMoved event). This prevents mouseleave
+ * events from firing on custom dropdowns/menus, keeping them open long
+ * enough for the agent to screenshot the expanded state.
  */
 export async function cdpClick(x, y) {
-  // mouseMoved → mousePressed → mouseReleased sequence
-  await cdpSend('Input.dispatchMouseEvent', {
-    type: 'mouseMoved', x, y, button: 'left', clickCount: 0
-  });
+  // HUMAN-LIKE: Smooth Bezier movement to target before clicking
+  await cdpMoveMouse(x, y);
+
+  // Click sequence: press → release (cursor is already at target from cdpMoveMouse)
   await sleep(50);
   await cdpSend('Input.dispatchMouseEvent', {
     type: 'mousePressed', x, y, button: 'left', clickCount: 1
@@ -103,6 +210,17 @@ export async function cdpClick(x, y) {
   await cdpSend('Input.dispatchMouseEvent', {
     type: 'mouseReleased', x, y, button: 'left', clickCount: 1
   });
+
+  // ANTI-BLINK: Park the cursor at click position to prevent mouseleave.
+  // This keeps custom dropdowns/menus open after the click.
+  // We send a final mouseMoved to the same coordinates after a tiny delay.
+  await sleep(10);
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x, y, button: 'none', clickCount: 0
+  }).catch(() => {}); // non-critical, safe to ignore errors
+
+  // Store park coordinates so other modules know where the cursor is
+  runtime._mouseParkCoords = { x, y };
 }
 
 /**
@@ -118,11 +236,12 @@ export async function cdpType(text) {
  * Perform a trusted hover via CDP Input.dispatchMouseEvent.
  * Moves the mouse to (x, y) and holds position — triggers :hover CSS,
  * reveals dropdown menus, shows tooltips, etc.
+ *
+ * HUMAN-LIKE: Moves along a Bezier curve before hovering.
  */
 export async function cdpHover(x, y) {
-  await cdpSend('Input.dispatchMouseEvent', {
-    type: 'mouseMoved', x, y, button: 'none', clickCount: 0
-  });
+  // HUMAN-LIKE: Smooth Bezier movement to target before hovering
+  await cdpMoveMouse(x, y);
 }
 
 /**
@@ -410,4 +529,51 @@ export async function waitPageReady() {
 
   // 3. DOM stability
   await sleep(domStableMs);
+}
+
+/**
+ * FAST-TRACK page readiness: minimal wait for dynamic UI elements.
+ *
+ * Used after click/hover actions where the goal is to capture a
+ * dropdown/menu/tooltip BEFORE it disappears (anti-blink strategy).
+ *
+ * Unlike waitPageReady(), this skips:
+ * - Network idle detection (analytics/ads don't matter for UI state)
+ * - DOM stability check (mutations are expected during animations)
+ *
+ * Only waits for the browser's next paint frame (~16ms) plus a small
+ * configurable delay for CSS transitions to complete.
+ *
+ * @param {number} extraDelayMs — additional delay after paint (default: from settings)
+ */
+export async function waitPageReadyFast(extraDelayMs) {
+  try {
+    const settings = await getSettings();
+    const delay = extraDelayMs ?? (settings.fast_track_delay_ms || 100);
+
+    // Minimal wait: just ensure readyState is at least 'interactive'
+    // (don't wait for 'complete' — resources may still be loading)
+    const start = Date.now();
+    while (Date.now() - start < 1000) {
+      try {
+        const result = await cdpSend('Runtime.evaluate', {
+          expression: 'document.readyState',
+          returnByValue: true
+        });
+        if (result?.result?.value === 'interactive' || result?.result?.value === 'complete') {
+          break;
+        }
+      } catch (_) {
+        break;
+      }
+      await sleep(16); // ~1 frame at 60fps
+    }
+
+    // Small delay for CSS transitions/animations to settle
+    // (dropdown menus typically animate in 150-300ms)
+    await sleep(delay);
+  } catch (_) {
+    // Fallback: just a tiny delay
+    await sleep(50);
+  }
 }

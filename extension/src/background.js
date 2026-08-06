@@ -255,6 +255,8 @@ async function attemptResume() {
     if (runtime.history.length > MAX_HISTORY) {
       runtime.history.splice(0, runtime.history.length - MAX_HISTORY);
     }
+    // Notify overlay widget that sleep has ended
+    broadcast({ kind: 'sleep_ended', wakeReason: 'alarm_timer', elapsedSec });
     // Clear sleep result now that we've used it
     runtime._sleepResult = null;
     runtime._currentSleep = null;

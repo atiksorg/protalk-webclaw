@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "WebClaw",
-  "version": "7.0.0",
-  "description": "An autonomous AI agent that drives any website by sight. Uses Chrome DevTools Protocol for trusted events and background screenshots. Vision-First architecture: screenshot → AI model → coordinate-based actions. No DOM parsing needed.",
+  "name": "WebClaw by ProTalk",
+  "version": "6.0.0",
+  "description": "Автономный ИИ-агент нового поколения для Chrome, который видит веб-страницы глазами, работает по расписанию и управляет браузером как человек.",
   "permissions": [
     "activeTab",
     "tabs",
@@ -22,7 +22,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "WebClaw — AI Browser Agent",
+    "default_title": "WebClaw by ProTalk — Автономный ИИ-агент нового поколения для Chrome",
     "default_popup": "src/popup.html",
     "default_icon": {
       "16": "icons/icon_16.png",

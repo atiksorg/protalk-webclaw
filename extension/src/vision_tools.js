@@ -90,6 +90,104 @@ export async function getViewportSize() {
 }
 
 // ============================================================
+// OVERLAY DETECTION (pre-click DOM probe for blocking elements)
+// ============================================================
+
+/**
+ * Detect if a point is covered by a likely overlay/modal element.
+ * Uses document.elementFromPoint and traverses up the DOM to find
+ * elements with high z-index, position: fixed/sticky, or common
+ * modal/overlay CSS classes.
+ *
+ * @param {number} x — viewport X in pixels
+ * @param {number} y — viewport Y in pixels
+ * @returns {Promise<Object>} { blocked: boolean, elementInfo?: { tag, classes, role, description } }
+ */
+export async function probeOverlayAtPoint(x, y) {
+  const script = `(function() {
+    var el = document.elementFromPoint(${x}, ${y});
+    if (!el || el.tagName === 'HTML' || el.tagName === 'BODY') return { blocked: false };
+    
+    var cur = el;
+    while (cur && cur !== document.body && cur !== document.documentElement) {
+      var style = window.getComputedStyle(cur);
+      var zIndex = parseInt(style.zIndex) || 0;
+      var position = style.position;
+      var rect = cur.getBoundingClientRect();
+      var w = window.innerWidth;
+      var h = window.innerHeight;
+      
+      // Heuristics for overlays:
+      // 1. High z-index (usually > 100) AND fixed/absolute position
+      // 2. Fixed position AND covers significant area (> 20% of screen)
+      // 3. Role "dialog" or "alertdialog"
+      // 4. Common class/id patterns
+      var isOverlay = false;
+      var reason = "";
+      
+      var role = (cur.getAttribute('role') || '').toLowerCase();
+      if (role === 'dialog' || role === 'alertdialog' || role === 'alert') {
+        isOverlay = true;
+        reason = "role=" + role;
+      }
+      
+      var className = (cur.className || '').toString().toLowerCase();
+      var id = (cur.id || '').toLowerCase();
+      var combined = className + " " + id;
+      if (/(modal|overlay|popup|dialog|consent|cookie|banner|gate|interstitial|paywall)/.test(combined)) {
+        isOverlay = true;
+        reason = "class/id pattern match";
+      }
+      
+      if ((position === 'fixed' || position === 'sticky') && zIndex > 100) {
+        isOverlay = true;
+        reason = "fixed/sticky z-index > 100";
+      }
+      
+      if (position === 'fixed') {
+        var areaRatio = (rect.width * rect.height) / (w * h);
+        if (areaRatio > 0.3) { // Covers 30% of screen
+            isOverlay = true;
+            reason = "large fixed element";
+        }
+      }
+      
+      if (isOverlay) {
+        return {
+          blocked: true,
+          elementInfo: {
+            tag: cur.tagName.toLowerCase(),
+            classes: className.slice(0, 100),
+            id: id,
+            role: role,
+            zIndex: zIndex,
+            position: position,
+            rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+            reason: reason
+          }
+        };
+      }
+      
+      cur = cur.parentElement;
+    }
+    return { blocked: false };
+  })()`;
+
+  try {
+    const result = await Promise.race([
+      cdpSend('Runtime.evaluate', { expression: script, returnByValue: true }),
+      new Promise(resolve => setTimeout(() => resolve(null), 400))
+    ]);
+
+    if (result?.result?.value && typeof result.result.value === 'object' && 'blocked' in result.result.value) {
+      return result.result.value;
+    }
+  } catch (_) {}
+
+  return { blocked: false };
+}
+
+// ============================================================
 // SELECT DETECTION (read-only DOM probe at click coordinates)
 // ============================================================
 
@@ -213,6 +311,21 @@ export async function toolClickAt(nx, ny, clickCount = 1) {
   try {
     // Focus agent tab so CDP events reach the page
     try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
+
+    // --- Overlay detection (read-only DOM probe, ≤400 ms) ---
+    // Check if the click target is covered by a likely overlay/modal element.
+    const overlay = await probeOverlayAtPoint(x, y);
+    if (overlay.blocked) {
+      return {
+        ok: false, 
+        tool: 'click_at', 
+        error: 'overlay_blocked',
+        normalized: { x: nx, y: ny }, 
+        actual: { x, y },
+        overlay: overlay.elementInfo,
+        hint: 'Клик заблокирован элементом поверх страницы (возможно, это попап, баннер куки или модальное окно). Пожалуйста, сначала найдите способ закрыть его (найдите крестик или кнопку "Принять/Закрыть").'
+      };
+    }
 
     // --- Select detection (read-only DOM probe, ≤500 ms) ---
     const detected = await detectSelectAtPoint(x, y);

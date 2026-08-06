@@ -32,6 +32,9 @@ const statusEl = $('status');
 // Provider section containers
 const protalkFieldsEl = $('protalk_fields');
 const nonProtalkFieldsEl = $('non_protalk_fields');
+// ProTalk OAuth
+const protalkLoginBtn = $('protalk_login_btn');
+const protalkAuthStatus = $('protalk_auth_status');
 // v3.0 elements
 const cdpInputEl = $('cdp_input_mode');
 const spaNetIdleEl = $('spa_network_idle_ms');
@@ -89,6 +92,104 @@ function toggleProviderFields() {
 
 providerEl.addEventListener('change', toggleProviderFields);
 
+// ── ProTalk OAuth: modal + postMessage auth flow ──
+const PROTALK_AUTH_URL = 'https://account.pro-talk.ru/login?iframe=1&embed=1';
+const PROTALK_ALLOWED_ORIGINS = [
+  'https://account.pro-talk.ru',
+  'https://eu1.account.dialog.ai.atiks.org'
+];
+
+let protalkModal = null;
+
+function updateProtalkAuthStatus(email) {
+  if (email) {
+    protalkAuthStatus.style.display = 'flex';
+    protalkAuthStatus.className = 'protalk-auth-status ok';
+    protalkAuthStatus.innerHTML = `✅ Авторизован как <strong>${email}</strong>` +
+      ` <button type="button" class="change-link" id="protalk_change_btn">сменить</button>`;
+    protalkLoginBtn.textContent = '🔄 Войти заново';
+    // Wire up the "change" link
+    const changeBtn = document.getElementById('protalk_change_btn');
+    if (changeBtn) changeBtn.addEventListener('click', openProtalkAuth);
+  } else {
+    protalkAuthStatus.style.display = 'none';
+    protalkAuthStatus.innerHTML = '';
+    protalkLoginBtn.textContent = '🔐 Войти через ProTalk';
+  }
+}
+
+function openProtalkAuth() {
+  if (protalkModal) return; // already open
+
+  const overlay = document.createElement('div');
+  overlay.className = 'protalk-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'protalk-modal';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'protalk-modal-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', closeProtalkAuth);
+
+  const iframe = document.createElement('iframe');
+  iframe.src = PROTALK_AUTH_URL;
+  iframe.setAttribute('allow', 'clipboard-write');
+
+  modal.appendChild(closeBtn);
+  modal.appendChild(iframe);
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeProtalkAuth(); });
+
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+  protalkModal = overlay;
+}
+
+function closeProtalkAuth() {
+  if (protalkModal) {
+    protalkModal.remove();
+    protalkModal = null;
+    document.body.style.overflow = '';
+  }
+}
+
+function handleProtalkMessage(event) {
+  // Origin validation
+  if (!PROTALK_ALLOWED_ORIGINS.some(origin => event.origin.startsWith(origin))) return;
+
+  let data = event.data;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch { return; }
+  }
+  if (!data || data.type !== 'protalk_auth_success') return;
+
+  const { user_bot_id, user_bot_token, email } = data;
+  if (!user_bot_id || !user_bot_token) return;
+
+  // Assemble auth_token: {user_bot_id}_{user_bot_token}
+  const authToken = `${user_bot_id}_${user_bot_token}`;
+
+  // Auto-fill form fields
+  tokenEl.value = authToken;
+  if (email) emailEl.value = email;
+
+  // Close modal
+  closeProtalkAuth();
+
+  // Show success status
+  updateProtalkAuthStatus(email);
+  setStatus(`✓ Авторизован как ${email || 'ProTalk'}. Нажмите «Сохранить»`, 'ok');
+}
+
+protalkLoginBtn.addEventListener('click', openProtalkAuth);
+window.addEventListener('message', handleProtalkMessage);
+
+// Close modal on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && protalkModal) closeProtalkAuth();
+});
+
 function setStatus(text, cls) {
   statusEl.textContent = text;
   statusEl.className = 'status' + (cls ? ' ' + cls : '');
@@ -98,6 +199,10 @@ async function load() {
   const s = await getSettings();
   tokenEl.value = s.auth_token || '';
   emailEl.value = s.user_email || '';
+  // Show ProTalk auth status if already authorized
+  if (s.auth_token && s.auth_token.includes('_') && s.user_email) {
+    updateProtalkAuthStatus(s.user_email);
+  }
   providerEl.value = s.provider || 'protalk';
   apiBaseUrlEl.value = s.api_base_url || '';
   apiKeyEl.value = s.api_key || '';

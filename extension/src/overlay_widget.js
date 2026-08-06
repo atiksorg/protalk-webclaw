@@ -790,6 +790,7 @@
   }
 
   function hideSleepPanel(wakeReason, elapsedSec) {
+    // Idempotent: safe to call multiple times
     isSleeping = false;
     if (sleepTimerInterval) { clearInterval(sleepTimerInterval); sleepTimerInterval = null; }
     sleepPanel.style.display = 'none';
@@ -800,7 +801,8 @@
         'visual_change_detected': '🔔 Обнаружено изменение экрана',
         'timeout': '⏰ Время ожидания истекло',
         'forced_by_user': '⚡ Пробуждено вручную',
-        'user_aborted': '⏹ Остановлено пользователем'
+        'user_aborted': '⏹ Остановлено пользователем',
+        'alarm_timer': '⏰ Время ожидания истекло'
       };
       const label = reasonLabels[wakeReason] || `🔔 Пробуждено: ${wakeReason}`;
       const timeText = elapsedSec ? ` (через ${formatSleepTime(elapsedSec)})` : '';
@@ -961,6 +963,10 @@
       case 'step_start':
         currentStep = msg.step;
         updateStep(msg.step);
+        // Hide sleep result banner if still visible — agent is actively working
+        if (sleepResult.style.display !== 'none') {
+          sleepResult.style.display = 'none';
+        }
         // Do NOT clear thought/action/observation here — they persist from
         // the previous step until new ones arrive. This prevents flickering
         // between steps.
@@ -1019,6 +1025,10 @@
       case 'action':
         currentAction = msg.action ? formatAction(msg.action) : '';
         updateAction(currentAction);
+        // Hide sleep result banner if still visible — agent is actively working
+        if (sleepResult.style.display !== 'none') {
+          sleepResult.style.display = 'none';
+        }
         break;
 
       // ---- Observation ----
@@ -1087,6 +1097,12 @@
         // Restore model name from message or previously stored value
         if (msg.model) modelName = msg.model;
         if (modelName) updateModel(modelName);
+        // Reset sleep panel if agent was sleeping before SW was unloaded.
+        // The background may have already sent sleep_ended, but if the SW
+        // was unloaded during deep sleep, the widget never received it.
+        if (isSleeping) {
+          hideSleepPanel('alarm_timer', sleepElapsedSec);
+        }
         break;
 
       // ---- API call logging ----
@@ -1216,6 +1232,9 @@
         // Restore sleep state if agent is sleeping
         if (resp.currentSleep) {
           showSleepPanel(resp.currentSleep.mode, resp.currentSleep.reason, resp.currentSleep.maxDurationSec, resp.currentSleep.startedAt);
+        } else if (isSleeping) {
+          // Agent was sleeping but woke up while SW was unloaded — hide the panel
+          hideSleepPanel('alarm_timer', sleepElapsedSec);
         }
       }
       // Also fetch log buffer to restore last known state (thoughts, actions, tokens)

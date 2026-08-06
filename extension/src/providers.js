@@ -13,7 +13,7 @@
 // each provider logs the API call details (CURL format, request/response bodies,
 // status codes, duration) for debugging and HTML report generation.
 
-import { broadcast } from './bus.js';
+import { broadcast, MODEL_TIMEOUT_MS } from './bus.js';
 import { uploadScreenshot, isDataUrl } from './file_upload.js';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -29,6 +29,39 @@ async function abortableSleep(ms, abortCheck) {
   while (Date.now() - start < ms) {
     if (abortCheck && abortCheck()) throw new Error('aborted');
     await sleep(Math.min(checkInterval, ms - (Date.now() - start)));
+  }
+}
+
+/**
+ * Fetch with AbortController timeout — prevents Chrome from killing the SW.
+ * Creates an AbortController, starts a timer, and aborts if the response
+ * doesn't arrive within `timeoutMs` milliseconds.
+ *
+ * @param {string} url
+ * @param {Object} fetchOptions — standard fetch options (method, headers, body, etc.)
+ * @param {number} [timeoutMs] — timeout in ms (default MODEL_TIMEOUT_MS = 25000)
+ * @returns {Promise<Response>}
+ * @throws {Error} 'model_timeout' if the timer fires (error.timedOut = true)
+ */
+async function fetchWithTimeout(url, fetchOptions = {}, timeoutMs) {
+  const ms = timeoutMs || MODEL_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+
+  try {
+    const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
+    clearTimeout(timer);
+    return response;
+  } catch (e) {
+    clearTimeout(timer);
+    // AbortError means the timeout fired (or user aborted via abortCheck)
+    if (e.name === 'AbortError') {
+      const err = new Error('model_timeout');
+      err.timedOut = true;
+      err.transient = true;
+      throw err;
+    }
+    throw e;
   }
 }
 
@@ -119,7 +152,7 @@ class ProTalkProvider {
     let responseBody = null;
     let errorStr = null;
 
-    const r = await fetch(this.baseUrl, {
+    const r = await fetchWithTimeout(this.baseUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload)
@@ -169,7 +202,7 @@ class ProTalkProvider {
       // Abort check at the top of every polling iteration
       if (abortCheck && abortCheck()) throw new Error('aborted');
       const startTime = Date.now();
-      const r = await fetch(url, { headers });
+      const r = await fetchWithTimeout(url, { headers });
       if (!r.ok) {
         if (r.status === 429 || r.status >= 500) {
           logApiCallAndBroadcast(sessionLogger, {
@@ -248,7 +281,7 @@ class OpenAIProvider {
     };
     const startTime = Date.now();
 
-    const r = await fetch(url, {
+    const r = await fetchWithTimeout(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
@@ -339,7 +372,7 @@ class AnthropicProvider {
     };
     const startTime = Date.now();
 
-    const r = await fetch(url, {
+    const r = await fetchWithTimeout(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
@@ -420,7 +453,7 @@ class OllamaProvider {
     const headers = { 'Content-Type': 'application/json' };
     const startTime = Date.now();
 
-    const r = await fetch(url, {
+    const r = await fetchWithTimeout(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
@@ -495,12 +528,19 @@ export function getProvider(settings) {
  * Call model with retry/backoff logic (provider-agnostic).
  * This replaces the old callModelWithBackoff() in background.js.
  *
+ * SW SURVIVAL: If the model takes too long (>25s), the AbortController fires
+ * and we catch 'model_timeout'. Rather than crashing, we return a special
+ * result with timedOut=true. The vision_loop handles this gracefully:
+ * saves state, logs "model timeout", and continues on the next iteration.
+ * This prevents Chrome from killing the SW mid-request (~30s threshold).
+ *
  * @param {Object} settings
  * @param {string} userText
  * @param {string|null} imageDataUrl
  * @param {Object} opts - { onTaskCreated, onLog, abortCheck, sessionLogger }
  *   abortCheck: () => boolean — checked before each API call, between retries,
  *               and inside polling loops (ProTalk) so that "Stop" interrupts immediately.
+ * @returns {Promise<{content: string, reasoning: string, tokensUsed: number, timedOut?: boolean}>}
  */
 export async function callModelWithBackoff(settings, userText, imageDataUrl, { onTaskCreated, onLog, abortCheck, sessionLogger, systemPrompt } = {}) {
   const provider = getProvider(settings);
@@ -515,6 +555,20 @@ export async function callModelWithBackoff(settings, userText, imageDataUrl, { o
     } catch (e) {
       lastErr = e;
       if (e.message === 'aborted') throw e; // Never retry on abort
+
+      // SW SURVIVAL: Model timed out (>25s). Return graceful result instead of crashing.
+      // The vision_loop will save state and continue — Chrome won't kill the SW.
+      if (e.timedOut || e.message === 'model_timeout') {
+        if (onLog) onLog(`⏱️ Model timeout after ${MODEL_TIMEOUT_MS / 1000}s — returning graceful result`);
+        broadcast({ kind: 'log', level: 'warn', text: `⏱️ Model timeout after ${MODEL_TIMEOUT_MS / 1000}s — SW survival mode` });
+        return {
+          content: '',
+          reasoning: '',
+          tokensUsed: 0,
+          timedOut: true
+        };
+      }
+
       if (!e.transient && !/poll_timeout|create_task_no_task_id/.test(e.message)) {
         throw e;
       }

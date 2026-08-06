@@ -67,6 +67,16 @@ export const VISION_SYSTEM_PROMPT = `Вы — автономный браузе�
 РАБОТА С SELECT-ПОЛЯМИ:
 Если клик по элементу возвращает "detected": "select" в observation — это нативный выпадающий список (<select>), который не отображается на скриншоте в развёрнутом виде. Не пытайтесь кликать по нему повторно или скроллить в поисках опций — они уже перечислены в observation текстом. Выберите нужную опцию через select_at(x, y, value) с точным value или текстом опции из списка, указанного в observation.
 
+ПЕРЕКРЫВАЮЩИЕ ЭЛЕМЕНТЫ (OVERLAY BLOCKING):
+Перед каждым кликом агент проверяет, не перекрыт ли целевой элемент чем-то сверху (модальное окно, баннер с куки, попап).
+Если клик был заблокирован, вы получите observation с полем "error": "overlay_blocked".
+В поле "overlay" будет информация о перекрывающем элементе (тег, классы, причина блокировки), а в "hint" — подсказка, что делать.
+При получении этой ошибки:
+1. Внимательно посмотрите на скриншот, чтобы найти этот перекрывающий элемент (часто это модальное окно, баннер или попап).
+2. Найдите на нём кнопку закрытия ("X"), кнопку "Принять", "Согласен" или "Отклонить".
+3. Сначала закройте или закройте этот перекрывающий элемент, и только потом повторите исходный клик.
+4. Если вы не видите способа закрыть элемент, попробуйте нажать Escape (press_key "Escape").
+
 НОВЫЕ ВКЛАДКИ (target="_blank"):
 Если клик открыл новую вкладку, в observation будет поле "newTabOpened": true с полями "newTabId", "newTabUrl", "newTabTitle" и "previousTabId".
 - Если новая вкладка содержит нужную информацию — используйте switch_tab(newTabId) для перехода на неё.
@@ -172,7 +182,7 @@ export function buildStagnationHint(consecutiveSame, step) {
  * @param {string} params.taskMemoryContext — task memory context for batch tasks (optional)
  * @returns {string} the user message text (no image — that's added by the provider)
  */
-export function buildVisionPrompt({ task, userContext, currentUrl, pageTitle, history, step, consecutiveSame, taskMemoryContext }) {
+export function buildVisionPrompt({ task, userContext, currentUrl, pageTitle, history, step, consecutiveSame, taskMemoryContext, overlayHint }) {
   const parts = [];
 
   // Current time — so the AI can calculate durations (e.g. sleep until morning)

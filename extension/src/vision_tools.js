@@ -84,113 +84,12 @@ export async function getViewportSize() {
       width: settings.agent_viewport_width || 1280,
       height: settings.agent_viewport_height || 800
     };
-  } catch (_) {}
-
-  return { width: 1280, height: 800 };
-}
-
-// ============================================================
-// OVERLAY DETECTION (pre-click DOM probe for blocking elements)
-// ============================================================
-
-/**
- * Detect if a point is covered by a likely overlay/modal element.
- * Uses document.elementFromPoint and traverses up the DOM to find
- * elements with high z-index, position: fixed/sticky, or common
- * modal/overlay CSS classes.
- *
- * @param {number} x — viewport X in pixels
- * @param {number} y — viewport Y in pixels
- * @returns {Promise<Object>} { blocked: boolean, elementInfo?: { tag, classes, role, description } }
- */
-export async function probeOverlayAtPoint(x, y) {
-  const script = `(function() {
-    var el = document.elementFromPoint(${x}, ${y});
-    if (!el || el.tagName === 'HTML' || el.tagName === 'BODY') return { blocked: false };
-    
-    var cur = el;
-    while (cur && cur !== document.body && cur !== document.documentElement) {
-      var style = window.getComputedStyle(cur);
-      var zIndex = parseInt(style.zIndex) || 0;
-      var position = style.position;
-      var rect = cur.getBoundingClientRect();
-      var w = window.innerWidth;
-      var h = window.innerHeight;
-      
-      // Heuristics for overlays:
-      // 1. High z-index (usually > 100) AND fixed/absolute position
-      // 2. Fixed position AND covers significant area (> 20% of screen)
-      // 3. Role "dialog" or "alertdialog"
-      // 4. Common class/id patterns
-      var isOverlay = false;
-      var reason = "";
-      
-      var role = (cur.getAttribute('role') || '').toLowerCase();
-      if (role === 'dialog' || role === 'alertdialog' || role === 'alert') {
-        isOverlay = true;
-        reason = "role=" + role;
-      }
-      
-      var className = (cur.className || '').toString().toLowerCase();
-      var id = (cur.id || '').toLowerCase();
-      var combined = className + " " + id;
-      if (/(modal|overlay|popup|dialog|consent|cookie|banner|gate|interstitial|paywall)/.test(combined)) {
-        isOverlay = true;
-        reason = "class/id pattern match";
-      }
-      
-      if ((position === 'fixed' || position === 'sticky') && zIndex > 100) {
-        isOverlay = true;
-        reason = "fixed/sticky z-index > 100";
-      }
-      
-      if (position === 'fixed') {
-        var areaRatio = (rect.width * rect.height) / (w * h);
-        if (areaRatio > 0.3) { // Covers 30% of screen
-            isOverlay = true;
-            reason = "large fixed element";
-        }
-      }
-      
-      if (isOverlay) {
-        return {
-          blocked: true,
-          elementInfo: {
-            tag: cur.tagName.toLowerCase(),
-            classes: className.slice(0, 100),
-            id: id,
-            role: role,
-            zIndex: zIndex,
-            position: position,
-            rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
-            reason: reason
-          }
-        };
-      }
-      
-      cur = cur.parentElement;
-    }
-    return { blocked: false };
-  })()`;
-
-  try {
-    const result = await Promise.race([
-      cdpSend('Runtime.evaluate', { expression: script, returnByValue: true }),
-      new Promise(resolve => setTimeout(() => resolve(null), 400))
-    ]);
-
-    if (result?.result?.value && typeof result.result.value === 'object' && 'blocked' in result.result.value) {
-      return result.result.value;
-    }
-  } catch (_) {}
-
-  return { blocked: false };
+  } catch (_) {}  return { width: 1280, height: 800 };
 }
 
 // ============================================================
 // SELECT DETECTION (read-only DOM probe at click coordinates)
 // ============================================================
-
 /**
  * Detect whether a native <select> element exists at the given viewport pixel coordinates.
  * Uses document.elementFromPoint — a single read-only DOM probe, no side effects.
@@ -311,21 +210,6 @@ export async function toolClickAt(nx, ny, clickCount = 1) {
   try {
     // Focus agent tab so CDP events reach the page
     try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
-
-    // --- Overlay detection (read-only DOM probe, ≤400 ms) ---
-    // Check if the click target is covered by a likely overlay/modal element.
-    const overlay = await probeOverlayAtPoint(x, y);
-    if (overlay.blocked) {
-      return {
-        ok: false, 
-        tool: 'click_at', 
-        error: 'overlay_blocked',
-        normalized: { x: nx, y: ny }, 
-        actual: { x, y },
-        overlay: overlay.elementInfo,
-        hint: 'Клик заблокирован элементом поверх страницы (возможно, это попап, баннер куки или модальное окно). Пожалуйста, сначала найдите способ закрыть его (найдите крестик или кнопку "Принять/Закрыть").'
-      };
-    }
 
     // --- Select detection (read-only DOM probe, ≤500 ms) ---
     const detected = await detectSelectAtPoint(x, y);
@@ -764,6 +648,116 @@ export async function toolMarkNode(nodeId, status, summary) {
   return { ok: true, tool: 'mark_node', nodeId: targetId, status, summary };
 }
 
+// ============================================================
+// SUBTASK STACK — call stack for multi-tab workflows
+// ============================================================
+
+/**
+ * Open a new tab and enter a subtask — saves the current context
+ * for guaranteed return via end_sub_task.
+ *
+ * The subtask runs in its own tab, with its own step budget.
+ * The main task is paused but NOT forgotten — it's on the stack.
+ *
+ * @param {string} goal — what needs to be done in the subtask
+ * @param {string} doneTrigger — how to know when it's complete
+ * @param {string} [url] — URL to open (default: about:blank)
+ * @param {number} [maxSteps] — step limit (default: 15, max: 30)
+ * @returns {Promise<Object>} observation
+ */
+export async function toolSubTask(goal, doneTrigger, url, maxSteps) {
+  const memory = runtime._memory;
+  if (!memory) return { ok: false, tool: 'sub_task', error: 'no_memory' };
+
+  if (!goal) return { ok: false, tool: 'sub_task', error: 'no_goal' };
+
+  try {
+    // Push subtask frame (saves current context: tabId, navNode)
+    const frame = memory.pushSubtask({
+      goal,
+      doneTrigger: doneTrigger || '',
+      maxSteps: maxSteps || 15,
+      returnTabId: runtime.agentTabId,
+      returnNavNodeId: memory.currentNodeId
+    });
+
+    // Save current URL for the frame
+    try {
+      const currentTab = await chrome.tabs.get(runtime.agentTabId);
+      frame.returnUrl = currentTab?.url || '';
+    } catch (_) {}
+
+    // Open new tab for the subtask
+    const newTab = await chrome.tabs.create({ url: url || 'about:blank', active: true });
+
+    // Switch CDP to the new tab (reuses existing infrastructure)
+    const switchResult = await toolSwitchTab(newTab.id);
+
+    broadcast({ kind: 'log', text: `↘️ Вход в подзадачу: ${goal} (лимит: ${frame.maxSteps} шагов)` });
+
+    return {
+      ok: true,
+      tool: 'sub_task',
+      subtaskId: frame.id,
+      goal: frame.goal,
+      doneTrigger: frame.doneTrigger,
+      maxSteps: frame.maxSteps,
+      newTabId: newTab.id,
+      switchResult
+    };
+  } catch (e) {
+    return { ok: false, tool: 'sub_task', error: e.message };
+  }
+}
+
+/**
+ * End the current subtask and return to the main task.
+ * Guaranteed return via code — does NOT rely on model memory.
+ *
+ * The subtask tab is closed, CDP switches back to the return tab,
+ * and the result is saved to the main task's scratchpad.
+ *
+ * @param {string} result — summary of what was accomplished
+ * @param {boolean} success — whether the subtask succeeded
+ * @returns {Promise<Object>} observation
+ */
+export async function toolEndSubTask(result, success = true) {
+  const memory = runtime._memory;
+  if (!memory) return { ok: false, tool: 'end_sub_task', error: 'no_memory' };
+
+  const frame = memory.getCurrentSubtask();
+  if (!frame) return { ok: false, tool: 'end_sub_task', error: 'no_active_subtask' };
+
+  const subtaskTabId = runtime.agentTabId; // current tab is the subtask tab
+
+  try {
+    // Return to main task tab (guaranteed by code, not model decision)
+    const switchResult = await toolSwitchTab(frame.returnTabId);
+
+    // Close the subtask tab (safe — might already be closed)
+    try {
+      await toolCloseTab(subtaskTabId);
+    } catch (_) {}
+
+    // Pop the frame and save result to scratchpad
+    const poppedFrame = memory.popSubtask(result || 'нет результата');
+
+    broadcast({ kind: 'log', text: `↗️ Возврат из подзадачи: ${result || 'нет результата'} (успех: ${success})` });
+
+    return {
+      ok: true,
+      tool: 'end_sub_task',
+      result: result || '',
+      success,
+      subtaskId: poppedFrame?.id,
+      stepsUsed: poppedFrame?.stepsUsed || 0,
+      switchResult
+    };
+  } catch (e) {
+    return { ok: false, tool: 'end_sub_task', error: e.message };
+  }
+}
+
 /**
  * Wait for a specified number of seconds.
  */
@@ -1141,6 +1135,12 @@ export async function executeVisionTool(action) {
 
     case 'mark_node':
       return await toolMarkNode(action.node_id, action.status, action.summary);
+
+    case 'sub_task':
+      return await toolSubTask(action.goal, action.done_trigger, action.url, action.max_steps);
+
+    case 'end_sub_task':
+      return await toolEndSubTask(action.result, action.success !== false);
 
     case 'wait':
       return await toolWait(action.seconds || 3);

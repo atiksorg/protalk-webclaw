@@ -494,8 +494,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             if (tab?.id) {
-              await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
-              sendResponse({ ok: true });
+              // Content scripts cannot be injected on chrome:// or extension pages
+              if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:'))) {
+                sendResponse({ ok: false, error: 'Невозможно показать виджет на системной странице Chrome. Откройте обычный сайт.' });
+                break;
+              }
+              try {
+                await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
+                sendResponse({ ok: true });
+              } catch (innerErr) {
+                // Content script may not be loaded yet on this page — try injecting it
+                try {
+                  await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['src/overlay_widget.js']
+                  });
+                  // Now retry the toggle
+                  await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
+                  sendResponse({ ok: true });
+                } catch (injectErr) {
+                  sendResponse({ ok: false, error: 'Виджет недоступен на этой странице: ' + injectErr.message });
+                }
+              }
             } else {
               sendResponse({ ok: false, error: 'no_active_tab' });
             }

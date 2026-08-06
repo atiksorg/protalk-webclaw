@@ -899,6 +899,29 @@
   // ============================================================
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Handle widget toggle from popup (via background relay) — no _agentEvent needed.
+    // This MUST be before the _agentEvent check, otherwise Chrome treats the
+    // unhandled message as "no receiver" and throws "Could not establish connection".
+    if (msg && (msg.kind === 'toggle_widget' || msg.kind === 'toggle_widget_visibility')) {
+      if (widgetDismissed || overlay.style.display === 'none') {
+        showWidget();
+        // If agent is idle, still show the widget briefly with empty state
+        if (!agentRunning) {
+          showEmpty();
+          // Auto-hide after 8 seconds if agent is not running
+          clearTimeout(widgetAutoHideTimer);
+          widgetAutoHideTimer = setTimeout(() => {
+            if (!agentRunning) hideWidget();
+          }, 8000);
+        }
+      } else {
+        hideWidget();
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    // All other messages must be agent events
     if (!msg || !msg._agentEvent) return;
 
     switch (msg.kind) {
@@ -1137,25 +1160,6 @@
         }
         break;
 
-      // ---- Widget visibility toggle (from popup) ----
-
-      case 'toggle_widget':
-      case 'toggle_widget_visibility':
-        if (widgetDismissed || overlay.style.display === 'none') {
-          showWidget();
-          // If agent is idle, still show the widget briefly with empty state
-          if (!agentRunning) {
-            showEmpty();
-            // Auto-hide after 8 seconds if agent is not running
-            clearTimeout(widgetAutoHideTimer);
-            widgetAutoHideTimer = setTimeout(() => {
-              if (!agentRunning) hideWidget();
-            }, 8000);
-          }
-        } else {
-          hideWidget();
-        }
-        break;
     }
 
     return true;

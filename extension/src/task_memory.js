@@ -30,6 +30,9 @@ export class TaskMemory {
     this.completedAt = 0;
     this.scratchpad = [];             // Scratchpad notes: persistent facts saved across pages
 
+    // Subtask Stack — call stack of active subtasks
+    this.subtaskStack = [];           // Array of SubtaskFrame objects (max depth 3)
+
     // Navigation Tree — hierarchical map of visited pages
     this.navTree = [];                // Array of NavNode objects
     this.currentNodeId = null;        // ID of the currently active node
@@ -49,6 +52,99 @@ export class TaskMemory {
 
   setUserContext(ctx) {
     this.userContext = ctx || '';
+  }
+
+  // ---- Subtask Stack management ----
+
+  /**
+   * Create a new subtask frame and push it onto the stack.
+   * Saves the current context (tab ID, nav node) for guaranteed return.
+   *
+   * @param {Object} opts
+   * @param {string} opts.goal — what needs to be done
+   * @param {string} opts.doneTrigger — how to know when it's done
+   * @param {number} opts.maxSteps — safety limit (default 15)
+   * @param {number} opts.returnTabId — current tab ID (saved before switch)
+   * @param {string|null} opts.returnNavNodeId — current nav node ID
+   * @param {string|null} opts.returnUrl — current URL
+   * @returns {Object} the created SubtaskFrame
+   * @throws {Error} if max nesting depth exceeded
+   */
+  pushSubtask({ goal, doneTrigger, maxSteps = 15, returnTabId, returnNavNodeId, returnUrl }) {
+    const MAX_SUBTASK_DEPTH = 3;
+    if (this.subtaskStack.length >= MAX_SUBTASK_DEPTH) {
+      throw new Error('max_nesting_depth_exceeded');
+    }
+    const frame = {
+      id: `sub_${Date.now()}`,
+      goal: goal || '',
+      doneTrigger: doneTrigger || '',
+      maxSteps: Math.max(1, Math.min(30, maxSteps)),
+      stepsUsed: 0,
+      returnTabId: returnTabId || null,
+      returnNavNodeId: returnNavNodeId || null,
+      returnUrl: returnUrl || null,
+      startedAt: Date.now()
+    };
+    this.subtaskStack.push(frame);
+    return frame;
+  }
+
+  /**
+   * Get the currently active (topmost) subtask frame.
+   * @returns {Object|null}
+   */
+  getCurrentSubtask() {
+    return this.subtaskStack.length > 0 ? this.subtaskStack[this.subtaskStack.length - 1] : null;
+  }
+
+  /**
+   * Pop the topmost subtask frame and record the result in scratchpad.
+   * @param {string} result — summary of what was accomplished
+   * @returns {Object|null} the popped frame
+   */
+  popSubtask(result) {
+    const frame = this.subtaskStack.pop();
+    if (frame) {
+      this.addNote(`[Подзадача завершена] ${frame.goal} → ${result || 'нет результата'}`);
+    }
+    return frame;
+  }
+
+  /**
+   * Build a compact prompt block showing the current subtask context.
+   * Rendered on every step while a subtask is active — ensures the model
+   * never forgets the main task and knows the subtask limits.
+   *
+   * @returns {string} prompt text, or empty string if no active subtask
+   */
+  buildSubtaskStackPrompt() {
+    if (this.subtaskStack.length === 0) return '';
+
+    const top = this.getCurrentSubtask();
+    if (!top) return '';
+
+    const lines = [
+      `⚠️ ВЫ СЕЙЧАС В ПОДЗАДАЧЕ (глубина ${this.subtaskStack.length}):`,
+      `Цель: ${top.goal}`,
+      `Триггер завершения: ${top.doneTrigger}`,
+      `Шагов использовано: ${top.stepsUsed}/${top.maxSteps}`,
+      `ОСНОВНАЯ ЗАДАЧА ПРИОСТАНОВЛЕНА, но НЕ ЗАБЫТА — она в стеке.`,
+      `Когда триггер сработает — вызовите end_sub_task(result), и вы автоматически`,
+      `вернётесь на вкладку и страницу, где остановилась основная задача.`
+    ];
+
+    // Show stack overview for nested subtasks
+    if (this.subtaskStack.length > 1) {
+      lines.push('');
+      lines.push('Стек подзадач:');
+      this.subtaskStack.forEach((f, i) => {
+        const marker = i === this.subtaskStack.length - 1 ? ' ▶' : '';
+        lines.push(`  [${i + 1}] ${f.goal.slice(0, 60)} (${f.stepsUsed}/${f.maxSteps})${marker}`);
+      });
+    }
+
+    return lines.join('\n');
   }
 
   // ---- Navigation Tree management ----
@@ -238,6 +334,12 @@ export class TaskMemory {
   toPromptContext() {
     const parts = [];
 
+    // Subtask stack (if currently inside a subtask)
+    const subtaskPrompt = this.buildSubtaskStackPrompt();
+    if (subtaskPrompt) {
+      parts.push(subtaskPrompt);
+    }
+
     // Navigation tree (if any nodes exist)
     const navTreePrompt = this.buildNavTreePrompt();
     if (navTreePrompt) {
@@ -265,6 +367,7 @@ export class TaskMemory {
     return {
       phase: this.phase,
       elapsed,
+      subtaskDepth: this.subtaskStack.length,
       navNodeCount: this.navTree.length,
       scratchpadCount: this.scratchpad.length
     };
@@ -275,6 +378,13 @@ export class TaskMemory {
   toStatusPayload() {
     return {
       phase: this.phase,
+      // Subtask stack summary
+      subtaskStack: this.subtaskStack.map(f => ({
+        id: f.id,
+        goal: f.goal.slice(0, 80),
+        stepsUsed: f.stepsUsed,
+        maxSteps: f.maxSteps
+      })),
       // Navigation tree summary
       navTree: {
         nodeCount: this.navTree.length,

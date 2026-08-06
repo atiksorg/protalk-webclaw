@@ -108,6 +108,7 @@ export const CDP_VERSION = '1.3';
 // Set to 25 seconds — slightly under Chrome's ~30s SW kill threshold.
 // Prevents the service worker from being killed mid-request.
 export const MODEL_TIMEOUT_MS = 25000;
+export const MAX_SUBTASK_DEPTH = 3;
 
 // ============================================================
 // UTILITY

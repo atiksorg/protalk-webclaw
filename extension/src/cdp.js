@@ -337,7 +337,14 @@ export async function captureScreenshot() {
     try {
       // Hide overlay widget before screenshot so AI doesn't see it
       await hideOverlayForScreenshot();
-      await sleep(50); // brief pause for DOM update to paint
+      // Wait for the browser to actually repaint the frame without the widget.
+      // requestAnimationFrame guarantees one paint cycle completed; two calls
+      // ensure the compositor has processed the DOM change (display:none).
+      await cdpSend('Runtime.evaluate', {
+        expression: `new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`,
+        returnByValue: true,
+        awaitPromise: true
+      }).catch(() => sleep(100)); // fallback if RAF fails in CDP context
 
       const result = await cdpSend('Page.captureScreenshot', {
         format: 'png',

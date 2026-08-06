@@ -308,6 +308,8 @@ function serializeMemory(memory) {
     scratchpad: memory.scratchpad || [],
     startedAt: memory.startedAt,
     completedAt: memory.completedAt,
+    // Subtask Stack
+    subtaskStack: memory.subtaskStack || [],
     // Navigation Tree
     navTree: memory.navTree || [],
     currentNodeId: memory.currentNodeId || null,
@@ -332,6 +334,9 @@ export function deserializeMemory(data, TaskMemoryClass) {
   memory.scratchpad = Array.isArray(data.scratchpad) ? data.scratchpad : [];
   memory.startedAt = data.startedAt || 0;
   memory.completedAt = data.completedAt || 0;
+
+  // Subtask Stack
+  memory.subtaskStack = Array.isArray(data.subtaskStack) ? data.subtaskStack : [];
 
   // Navigation Tree
   memory.navTree = Array.isArray(data.navTree) ? data.navTree : [];

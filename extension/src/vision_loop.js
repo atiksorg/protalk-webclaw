@@ -16,7 +16,7 @@ import { getSettings } from './settings.js';
 import { callModelWithBackoff } from './providers.js';
 import { runtime, sleep, broadcast, STEP_CAP_DEFAULT, STEP_DELAY_MS, MAX_HISTORY, setIconMode, MODEL_TIMEOUT_MS } from './bus.js';
 import { waitPageReady, waitPageReadyFast, captureScreenshot } from './cdp.js';
-import { executeVisionTool, executeActionChain } from './vision_tools.js';
+import { executeVisionTool, executeActionChain, toolEndSubTask } from './vision_tools.js';
 import {
   VISION_SYSTEM_PROMPT,
   buildVisionPrompt,
@@ -169,7 +169,7 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
       const effectiveHistory = runtime._reducedHistoryMode
         ? runtime.history.slice(-3)
         : runtime.history;
-      const hasMemoryContent = memory.scratchpad.length > 0 || memory.navTree.length > 0;
+      const hasMemoryContent = memory.scratchpad.length > 0 || memory.navTree.length > 0 || memory.subtaskStack.length > 0;
       const userMessage = buildVisionPrompt({
         task: runtime.task,
         userContext: runtime.context,
@@ -347,7 +347,33 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
         runtime._fastTrackMode = false;
       }
 
-      // 8a) Deep sleep check — if agent entered hibernation, STOP the loop.
+      // 8a) Subtask safety timeout — force return if steps exceeded
+      const currentSubtaskFrame = memory.getCurrentSubtask();
+      if (currentSubtaskFrame && action.tool !== 'end_sub_task') {
+        currentSubtaskFrame.stepsUsed++;
+        if (currentSubtaskFrame.stepsUsed >= currentSubtaskFrame.maxSteps) {
+          broadcast({
+            kind: 'log',
+            level: 'warn',
+            text: `⚠️ Subtask timeout: ${currentSubtaskFrame.stepsUsed}/${currentSubtaskFrame.maxSteps} steps — forcing return to main task`
+          });
+          try {
+            await toolEndSubTask('timeout: превышен лимит шагов подзадачи', false);
+          } catch (e) {
+            broadcast({ kind: 'log', level: 'error', text: 'Subtask force-end failed: ' + e.message });
+          }
+          // Record in history so model understands what happened
+          runtime.history.push({
+            action: '[СИСТЕМА] Принудительное завершение подзадачи',
+            observation: `Лимит шагов подзадачи (${currentSubtaskFrame.maxSteps}) превышен. Агент автоматически вернулся на основную вкладку.`
+          });
+          if (runtime.history.length > MAX_HISTORY) {
+            runtime.history.splice(0, runtime.history.length - MAX_HISTORY);
+          }
+        }
+      }
+
+      // 8b) Deep sleep check — if agent entered hibernation, STOP the loop.
       // CDP is detached, heartbeat is stopped, state is saved by persistence.
       // The alarm will fire later and attemptResume will restart this loop.
       if (observation?.ok && observation?.mode === 'deep_sleep') {

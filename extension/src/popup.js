@@ -312,7 +312,16 @@ startBtn.addEventListener('click', async () => {
 
 stopBtn.addEventListener('click', async () => {
   appendLog('⏹ Остановка...');
-  await chrome.runtime.sendMessage({ kind: 'stop' });
+  // Optimistic UI update — don't wait for broadcast
+  running = false;
+  paused = false;
+  refresh();
+  try {
+    await chrome.runtime.sendMessage({ kind: 'stop' });
+  } catch (e) {
+    appendLog('Ошибка остановки: ' + (e.message || 'SW недоступен'), 'err');
+    // Even if SW is not responding, clear persisted state on next wake
+  }
 });
 
 pauseBtn.addEventListener('click', async () => {
@@ -343,7 +352,13 @@ monitorBtn.addEventListener('click', async () => {
   try {
     // Open Side Panel via chrome.sidePanel API (Chrome 114+)
     if (chrome.sidePanel) {
-      await chrome.sidePanel.open({ windowId: undefined });
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const windowId = tab?.windowId || (await chrome.windows.getCurrent()).id;
+      if (windowId) {
+        await chrome.sidePanel.open({ windowId });
+      } else {
+        throw new Error('no windowId');
+      }
     } else {
       // Fallback: open sidepanel.html in a new tab
       window.open(chrome.runtime.getURL('src/sidepanel.html'), '_blank');
@@ -356,8 +371,15 @@ monitorBtn.addEventListener('click', async () => {
 sidebarBtn.addEventListener('click', async () => {
   try {
     if (chrome.sidePanel && chrome.sidePanel.open) {
-      await chrome.sidePanel.open({ windowId: undefined });
-      appendLog('🪟 Сайдбар открыт', 'ok');
+      // Get the current window ID — popup knows which window it's in
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const windowId = tab?.windowId || (await chrome.windows.getCurrent()).id;
+      if (windowId) {
+        await chrome.sidePanel.open({ windowId });
+        appendLog('🪟 Сайдбар открыт', 'ok');
+      } else {
+        throw new Error('no windowId');
+      }
     } else {
       window.open(chrome.runtime.getURL('src/sidepanel.html'), '_blank');
       appendLog('🪟 Сайдбар открыт в новой вкладке');
@@ -371,21 +393,15 @@ sidebarBtn.addEventListener('click', async () => {
 let widgetVisible = false; // track widget state for toggle
 toggleWidgetBtn.addEventListener('click', async () => {
   try {
-    // Send message to background to toggle the overlay widget on the active tab
+    // Popup cannot talk to content scripts directly —
+    // always relay through background service worker.
     const r = await chrome.runtime.sendMessage({ kind: 'toggle_overlay_widget' });
     if (r?.ok) {
       widgetVisible = !widgetVisible;
       toggleWidgetBtn.textContent = widgetVisible ? '🔲 Виджет ✓' : '🔲 Виджет';
       appendLog(widgetVisible ? '🔲 Виджет показан' : '🔲 Виджет скрыт');
     } else {
-      // Fallback: send directly to content script on active tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab?.id) {
-        await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
-        widgetVisible = !widgetVisible;
-        toggleWidgetBtn.textContent = widgetVisible ? '🔲 Виджет ✓' : '🔲 Виджет';
-        appendLog(widgetVisible ? '🔲 Виджет показан' : '🔲 Виджет скрыт');
-      }
+      appendLog('Виджет недоступен: ' + (r?.error || 'нет активной вкладки'), 'err');
     }
   } catch (e) {
     appendLog('Ошибка: виджет недоступен на этой странице', 'err');

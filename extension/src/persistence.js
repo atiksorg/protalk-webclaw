@@ -79,6 +79,9 @@ export async function saveState(runtime, memory) {
     // Current sleep info (for UI rehydration on pages loaded mid-sleep)
     currentSleep: runtime._currentSleep || null,
 
+    // Deep sleep alarm name (for tracking active hibernation alarm after SW wake)
+    deepSleepAlarmName: runtime._deepSleepAlarmName || null,
+
     // Log buffer (for UI restoration after SW wake)
     logBuffer: runtime._logBuffer ? runtime._logBuffer.slice(-runtime._logBufferMax) : []
   };

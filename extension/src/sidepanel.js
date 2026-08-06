@@ -261,14 +261,34 @@ function renderSleepEndCard(wakeReason, elapsedSec) {
 }
 
 // Global force-wake handler (called from inline onclick)
-window._forceWakeFromSidepanel = function() {
-  chrome.runtime.sendMessage({ kind: 'force_wake' }).catch(() => {});
+window._forceWakeFromSidepanel = async function() {
   // Optimistic UI: disable the button
   const btn = document.querySelector('.sleep-wake-btn');
   if (btn) {
     btn.textContent = '⚡ Пробуждение...';
     btn.disabled = true;
     btn.style.opacity = '0.5';
+  }
+  try {
+    const r = await chrome.runtime.sendMessage({ kind: 'force_wake' });
+    if (!r?.ok) {
+      console.warn('[sidepanel] force_wake failed:', r?.error);
+      // Re-enable button on failure
+      if (btn) {
+        btn.textContent = '⚡ Разбудить сейчас';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }
+    // On success: UI will update via broadcast events (sleep_ended, force_wake)
+  } catch (e) {
+    console.error('[sidepanel] force_wake error:', e.message);
+    // Re-enable button on error
+    if (btn) {
+      btn.textContent = '⚡ Разбудить сейчас';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
   }
 };
 

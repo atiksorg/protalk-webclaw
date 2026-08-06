@@ -77,6 +77,8 @@ export function rehydrateRuntime(state) {
   runtime._logBuffer = Array.isArray(state.logBuffer) ? state.logBuffer : [];
   // Restore current sleep info so UI can show sleep state after page reload
   runtime._currentSleep = state.currentSleep || null;
+  // Restore deep sleep alarm name (for tracking active hibernation alarm after SW wake)
+  runtime._deepSleepAlarmName = state.deepSleepAlarmName || null;
   // Mark that this session was resumed (not freshly started)
   runtime._resumed = true;
 }

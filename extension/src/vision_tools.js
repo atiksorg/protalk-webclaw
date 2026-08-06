@@ -24,7 +24,8 @@
 import { runtime, sleep, humanDelay, humanSleep, humanThinkPause, broadcast, setIconMode } from './bus.js';
 import {
   cdpClick, cdpType, cdpPressKey, cdpHover, cdpSend,
-  waitPageReady, captureScreenshot, cdpDetach
+  cdpAttach, cdpDetach,
+  waitPageReady, captureScreenshot
 } from './cdp.js';
 import { PHASES } from './task_memory.js';
 import { getSettings } from './settings.js';
@@ -137,6 +138,63 @@ async function detectSelectAtPoint(x, y) {
 }
 
 // ============================================================
+// NEW TAB DETECTION (target="_blank" monitoring)
+// ============================================================
+
+/**
+ * Snapshot the set of all tab IDs in the current window.
+ * Used before a click to detect if the click opened a new tab.
+ *
+ * @returns {Promise<Set<number>>} set of tab IDs
+ */
+export async function snapshotTabIds() {
+  try {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    return new Set(tabs.map(t => t.id));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+/**
+ * Compare current tabs against a pre-click snapshot to find a newly opened tab.
+ * Only returns tabs whose `openerTabId` matches the agent's active tab —
+ * this filters out tabs opened by the user or other extensions.
+ *
+ * @param {Set<number>} beforeTabIds — snapshot from before the click
+ * @param {number} maxAgeMs — maximum age of the new tab in ms (default 3000)
+ * @returns {Promise<chrome.tabs.Tab|null>} the new tab, or null if none found
+ */
+export async function detectNewTab(beforeTabIds, maxAgeMs = 3000) {
+  if (!beforeTabIds || beforeTabIds.size === 0) return null;
+
+  try {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+
+    for (const tab of tabs) {
+      // Skip tabs that existed before the click
+      if (beforeTabIds.has(tab.id)) continue;
+
+      // Only consider tabs opened by the agent's own tab
+      if (tab.openerTabId !== runtime.agentTabId) continue;
+
+      // Sanity check: tab should be reasonably fresh
+      // (some browsers don't expose tab creation time, so this is best-effort)
+      return tab;
+    }
+
+    // Fallback: if openerTabId is not available (some Chrome versions),
+    // look for the single newest tab that wasn't in our snapshot
+    const newTabs = tabs.filter(t => !beforeTabIds.has(t.id));
+    if (newTabs.length === 1) {
+      return newTabs[0];
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+// ============================================================
 // VISION TOOLS — each returns { ok, ... } observation
 // ============================================================
 
@@ -186,12 +244,34 @@ export async function toolClickAt(nx, ny, clickCount = 1) {
     }
 
     // --- Normal click (not a <select>) ---
+    // Snapshot current tab IDs before clicking (for new tab detection)
+    const tabIdsBefore = await snapshotTabIds();
+
     for (let i = 0; i < clickCount; i++) {
       await cdpClick(x, y);
       if (i < clickCount - 1) await sleep(100);
     }
 
-    return { ok: true, tool: 'click_at', normalized: { x: nx, y: ny }, actual: { x, y }, clickCount };
+    // --- Detect if a new tab was opened by the click (target="_blank") ---
+    // Wait a brief moment for the new tab to be created
+    await sleep(500);
+    const newTab = await detectNewTab(tabIdsBefore);
+
+    const observation = {
+      ok: true, tool: 'click_at',
+      normalized: { x: nx, y: ny }, actual: { x, y }, clickCount
+    };
+
+    if (newTab) {
+      observation.newTabOpened = true;
+      observation.newTabId = newTab.id;
+      observation.newTabUrl = (newTab.url || '').slice(0, 200);
+      observation.newTabTitle = (newTab.title || '').slice(0, 100);
+      observation.previousTabId = runtime.agentTabId;
+      observation.hint = 'Новая вкладка открылась кликом. Если хотите её посмотреть — switch_tab(newTabId). Если хотите остаться здесь — игнорируйте. Чтобы закрыть ненужную вкладку — close_tab(newTabId).';
+    }
+
+    return observation;
   } catch (e) {
     return { ok: false, tool: 'click_at', error: e.message, normalized: { x: nx, y: ny } };
   }
@@ -423,6 +503,89 @@ export async function toolBack() {
     return { ok: true, tool: 'back' };
   } catch (e) {
     return { ok: false, tool: 'back', error: e.message };
+  }
+}
+
+/**
+ * Switch to another browser tab by ID.
+ * Detaches CDP from the current tab, updates agentTabId,
+ * attaches CDP to the target tab, and waits for page readiness.
+ *
+ * Used after target="_blank" links open a new tab — the agent
+ * can switch to inspect it, then switch back if it's not useful.
+ *
+ * @param {number} tabId — Chrome tab ID to switch to
+ */
+export async function toolSwitchTab(tabId) {
+  if (!tabId) return { ok: false, tool: 'switch_tab', error: 'no_tab_id' };
+
+  try {
+    // Verify the target tab exists
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab) return { ok: false, tool: 'switch_tab', error: 'tab_not_found', tabId };
+
+    const previousTabId = runtime.agentTabId;
+
+    // Skip if already on this tab
+    if (previousTabId === tabId) {
+      return { ok: true, tool: 'switch_tab', alreadyThere: true, tabId, url: tab.url };
+    }
+
+    // Detach CDP from current tab (safe — no-op if not attached)
+    if (runtime.cdpAttached) {
+      await cdpDetach();
+    }
+
+    // Update agent tab reference
+    runtime.agentTabId = tabId;
+
+    // Attach CDP to the new tab
+    await cdpAttach(tabId);
+
+    // Focus the new tab
+    try { await chrome.tabs.update(tabId, { active: true }); } catch (_) {}
+
+    // Wait for page readiness
+    await sleep(1000);
+    try { await waitPageReady(); } catch (_) {}
+
+    broadcast({ kind: 'log', text: `🔀 Switched to tab ${tabId}: ${(tab.url || '').slice(0, 80)}` });
+
+    return {
+      ok: true, tool: 'switch_tab',
+      previousTabId,
+      newTabId: tabId,
+      url: (tab.url || '').slice(0, 200),
+      title: (tab.title || '').slice(0, 100)
+    };
+  } catch (e) {
+    return { ok: false, tool: 'switch_tab', error: e.message, tabId };
+  }
+}
+
+/**
+ * Close a browser tab by ID.
+ * If the closed tab is the current agent tab, returns an error —
+ * the agent must switch to another tab first.
+ *
+ * Used to clean up target="_blank" tabs that turned out to be useless.
+ *
+ * @param {number} tabId — Chrome tab ID to close
+ */
+export async function toolCloseTab(tabId) {
+  if (!tabId) return { ok: false, tool: 'close_tab', error: 'no_tab_id' };
+
+  // Safety: don't allow closing the agent's own active tab
+  if (tabId === runtime.agentTabId) {
+    return { ok: false, tool: 'close_tab', error: 'cannot_close_active_tab', hint: 'Сначала переключитесь на другую вкладку через switch_tab, затем закройте эту.' };
+  }
+
+  try {
+    await chrome.tabs.remove(tabId);
+    broadcast({ kind: 'log', text: `🗑️ Closed tab ${tabId}` });
+    return { ok: true, tool: 'close_tab', closedTabId: tabId };
+  } catch (e) {
+    return { ok: false, tool: 'close_tab', error: e.message, tabId };
   }
 }
 
@@ -853,6 +1016,12 @@ export async function executeVisionTool(action) {
 
     case 'back':
       return await toolBack();
+
+    case 'switch_tab':
+      return await toolSwitchTab(action.tab_id);
+
+    case 'close_tab':
+      return await toolCloseTab(action.tab_id);
 
     case 'jump_to_node':
       return await toolJumpToNode(action.node_id);

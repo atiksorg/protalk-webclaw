@@ -36,12 +36,17 @@ import {
   handleDeepSleepAlarm, cancelDeepSleep
 } from './persistence.js';
 
+// Module-level stop flag: set SYNCHRONOUSLY by the stop handler before any await.
+// Checked by IIFE and attemptResume to prevent race conditions with SW wake.
+let _stopRequested = false;
+
 // ============================================================
 // START AGENT (top-level orchestrator)
 // ============================================================
 
 async function startAgent({ task, context, initialUrl, options }) {
   if (runtime.running) return { ok: false, error: 'already_running' };
+  _stopRequested = false; // Reset stop flag for fresh start
   const settings = await getSettings();
   // Validate: need model + some form of auth (except Ollama which is local)
   const provider = (settings.provider || '').toLowerCase();
@@ -155,11 +160,31 @@ async function startAgent({ task, context, initialUrl, options }) {
  * @returns {Promise<boolean>} true if resume was successful
  */
 async function attemptResume() {
+  // Stop guard: if user requested stop while SW was waking up, abort immediately
+  if (_stopRequested) {
+    broadcast({ kind: 'log', text: '[resume] Abort: stop was requested during SW wake' });
+    // Clean up persisted state so we don't loop
+    await clearState();
+    await setIconMode('idle');
+    return false;
+  }
+
   const state = await loadState();
   if (!state) return false;
 
   // Rehydrate runtime from persisted state
   rehydrateRuntime(state);
+
+  // Second stop guard: rehydrateRuntime resets abortFlag, so re-check _stopRequested
+  // This handles the race where stop arrives between loadState and rehydrate
+  if (_stopRequested) {
+    runtime.running = false;
+    runtime.abortFlag = true;
+    await clearState();
+    await setIconMode('idle');
+    broadcast({ kind: 'log', text: '[resume] Abort: stop requested after rehydrate' });
+    return false;
+  }
 
   // Re-create TaskMemory
   const memory = deserializeMemory(state.memory, TaskMemory);
@@ -198,9 +223,27 @@ async function attemptResume() {
   }
 
   // Notify UI
-  // Inject wake context into history if resuming from deep sleep
+  // If this session is in deep sleep, restore state but DON'T start the loop.
+  // The loop will be started when the alarm fires or when force_wake is received.
+  if (memory.phase === 'deep_sleep') {
+    broadcast({ kind: 'log', text: '🕳️ Restored deep sleep session — waiting for alarm or manual wake' });
+    broadcast({
+      kind: 'sleep_started',
+      mode: 'deep_sleep',
+      reason: runtime._sleepResult?.reason || 'hibernation',
+      maxDurationSec: runtime._sleepResult?.requestedDurationSec || 0,
+      startedAt: runtime._sleepResult?.startedAt || Date.now(),
+      wakeCondition: 'alarm_timer'
+    });
+    await setIconMode('sleeping');
+    // Don't start heartbeat (we're hibernating)
+    // Don't start the vision loop
+    return true;
+  }
+
+  // Inject wake context into history if resuming from a normal interrupt
   // This helps the model understand WHY it woke up and how much time passed
-  if (memory.phase === 'deep_sleep' && runtime._sleepResult) {
+  if (runtime._sleepResult) {
     const sleepResult = runtime._sleepResult;
     const elapsed = Date.now() - (sleepResult.startedAt || Date.now());
     const elapsedSec = Math.round(elapsed / 1000);
@@ -291,6 +334,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       switch (msg.kind) {
         case 'start': {
+          // If agent is already running, check if it's a zombie (resumed from stale state)
+          if (runtime.running) {
+            // If this was a resumed session without a valid agent tab, treat as zombie
+            if (runtime._resumed && !runtime.agentTabId) {
+              broadcast({ kind: 'log', level: 'warn', text: '[start] Zombie session detected (resumed without tab), forcing cleanup' });
+              await cleanupAgent();
+            } else {
+              sendResponse({ ok: false, error: 'already_running', step: runtime.step, task: runtime.task });
+              break;
+            }
+          }
+          // Zombie cleanup: if a previous session was persisted but SW was unloaded,
+          // clear any stale state before starting fresh
+          try {
+            const stale = await loadState();
+            if (stale && stale.running) {
+              broadcast({ kind: 'log', level: 'warn', text: '[start] Clearing stale persisted session (step ' + (stale.step || 0) + ')' });
+              await clearState();
+            }
+          } catch (_) {}
+          // Also clear any leftover runtime state from a zombie session
+          if (runtime.running) {
+            await cleanupAgent();
+          }
           // Respond immediately so popup UI isn't blocked for the entire session.
           sendResponse({ ok: true, started: true });
           try {
@@ -300,6 +367,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               initialUrl: msg.initialUrl,
               options: msg.options || {}
             });
+            // If startAgent returned an error (e.g. missing_settings), broadcast it
+            if (r && !r.ok) {
+              broadcast({ kind: 'log', level: 'error', text: 'startAgent error: ' + (r.error || r.reason || 'unknown') });
+              broadcast({ kind: 'finished', ok: false, reason: r.error || r.reason || 'unknown', steps: runtime.step });
+            }
             // Deep sleep: state is preserved for alarm — do NOT cleanup
             if (!(r?.ok && r?.reason === 'deep_sleep')) {
               await cleanupAgent();
@@ -312,7 +384,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         case 'stop':
+          _stopRequested = true;
           runtime.abortFlag = true;
+          runtime.running = false;
           runtime.pauseFlag = false;
           runtime._forceWakeFlag = false;
           runtime._deepSleepAlarmName = null;
@@ -324,6 +398,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           stopHeartbeat();
           await cancelDeepSleep(); // Cancel any deep-sleep alarms
           await clearState();
+          broadcast({ kind: 'finished', ok: false, reason: 'stopped_by_user', steps: runtime.step });
           sendResponse({ ok: true });
           break;
         case 'pause':
@@ -410,6 +485,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
           break;
         }
+        case 'toggle_overlay_widget': {
+          // Toggle overlay widget on the active tab.
+          // Popup cannot send messages to content scripts directly —
+          // it needs the background to relay the message.
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (tab?.id) {
+              await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
+              sendResponse({ ok: true });
+            } else {
+              sendResponse({ ok: false, error: 'no_active_tab' });
+            }
+          } catch (e) {
+            sendResponse({ ok: false, error: 'content_script_unavailable: ' + e.message });
+          }
+          break;
+        }
         case 'openOptions':
           chrome.runtime.openOptionsPage();
           sendResponse({ ok: true });
@@ -443,7 +535,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
         case 'force_wake': {
+          // If runtime is not active, try to load persisted state (SW may have been unloaded)
           if (!runtime.running) {
+            const persistedState = await loadState();
+            if (persistedState && persistedState.memory?.phase === 'deep_sleep') {
+              // Deep sleep session exists in storage — cancel alarm and resume
+              broadcast({ kind: 'log', text: '⚡ Force wake: SW was unloaded, loading persisted deep-sleep session' });
+              await cancelDeepSleep();
+              _stopRequested = false;
+              // Override phase in storage so attemptResume() won't early-return
+              persistedState.memory.phase = 'executing';
+              // Save the overridden state before resuming
+              try { await chrome.storage.session.set({ webclaw_agent_state: persistedState }); } catch (_) {}
+              sendResponse({ ok: true, mode: 'deep_sleep_resumed' });
+              // attemptResume will rehydrate runtime, re-attach tab, and continue the loop
+              await attemptResume();
+              break;
+            } else if (persistedState) {
+              // Non-deep-sleep persisted session — just resume it
+              broadcast({ kind: 'log', text: '⚡ Force wake: resuming persisted session' });
+              _stopRequested = false;
+              sendResponse({ ok: true, mode: 'resumed' });
+              await attemptResume();
+              break;
+            }
             sendResponse({ ok: false, error: 'not_running' });
             break;
           }
@@ -463,6 +578,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             await cancelDeepSleep();
             runtime._forceWakeFlag = false;
             runtime._deepSleepAlarmName = null;
+            _stopRequested = false; // Allow attemptResume to proceed
+            // Override phase so attemptResume() won't early-return at deep_sleep check
+            if (runtime._memory) {
+              runtime._memory.setPhase(PHASES.EXECUTING);
+            }
+            // Persist the overridden state so loadState() in attemptResume finds correct phase
+            await saveState(runtime, runtime._memory);
             // Inject forced wake context into history before resuming
             if (runtime._sleepResult) {
               const elapsed = Date.now() - (runtime._sleepResult.startedAt || Date.now());
@@ -520,9 +642,30 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (isDeepSleep) {
     // Agent was in deep hibernation — wake up and resume the loop
     broadcast({ kind: 'log', text: '🕳️ Deep sleep alarm fired — resuming agent from hibernation' });
-    if (!runtime.running) {
-      await attemptResume();
+    // Clear deep sleep state so attemptResume() doesn't early-return
+    // For the case where SW was unloaded and will reload state from storage,
+    // override the phase in storage itself
+    if (runtime._memory) {
+      runtime._memory.setPhase(PHASES.EXECUTING);
     }
+    runtime._sleepResult = null;
+    runtime._currentSleep = null;
+    runtime._deepSleepAlarmName = null;
+    // Persist the phase override so attemptResume() reads 'executing' from storage
+    // (covers both SW-alive and SW-unloaded scenarios)
+    if (runtime.running) {
+      await saveState(runtime, runtime._memory);
+    } else {
+      // SW was unloaded — override phase directly in storage before attemptResume loads it
+      try {
+        const stored = await chrome.storage.session.get('webclaw_agent_state');
+        if (stored.webclaw_agent_state?.memory) {
+          stored.webclaw_agent_state.memory.phase = 'executing';
+          await chrome.storage.session.set(stored);
+        }
+      } catch (_) {}
+    }
+    await attemptResume();
   } else if (handled && !runtime.running) {
     // Regular heartbeat — just resume if needed
     await attemptResume();
@@ -595,11 +738,8 @@ chrome.runtime.onStartup?.addListener(async () => {
 (async () => {
   try {
     const active = await isSessionActive();
-    if (active && !runtime.running) {
-      await sleep(500);
-      if (!runtime.running) {
-        await attemptResume();
-      }
+    if (active && !runtime.running && !_stopRequested) {
+      await attemptResume();
     }
   } catch (_) {}
 })();

@@ -1216,6 +1216,32 @@
     // Always start hidden — will show only if agent is running
     overlay.style.display = 'none';
 
+    // On Google Colab, auto-hide the widget to avoid interfering with code cells.
+    // Colab has a complex UI with toolbars and code editors that need every pixel.
+    // The widget can block important UI elements (run button, cell menu, etc.)
+    try {
+      const isColab = location.hostname === 'colab.research.google.com';
+      if (isColab) {
+        // Auto-hide widget after a brief appearance when agent starts
+        // Users can still toggle it via popup → "Show widget" button
+        const _origShowWidget = showWidget;
+        let _colabAutoHideTimer = null;
+        showWidget = function() {
+          _origShowWidget();
+          if (isColab) {
+            clearTimeout(_colabAutoHideTimer);
+            _colabAutoHideTimer = setTimeout(() => {
+              if (agentRunning) {
+                // Keep widget hidden on Colab while agent is running
+                // (it would overlap code cells). Users can toggle via popup.
+                hideWidget();
+              }
+            }, 3000); // show briefly for 3s then auto-hide
+          }
+        };
+      }
+    } catch (_) {}
+
     try {
       const resp = await chrome.runtime.sendMessage({ kind: 'status' });
       if (resp && resp.running) {

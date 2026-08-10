@@ -10,6 +10,7 @@
 // Toolset:
 //   click_at       — Click at normalized (x, y)
 //   type_at        — Click at (x, y), clear field, type text
+//   paste_text     — Click at (x, y), paste text via clipboard (Ctrl+V)
 //   press_key      — Keyboard key press
 //   scroll         — Scroll at (x, y) in a direction
 //   hover_at       — Hover at (x, y)
@@ -278,6 +279,11 @@ export async function toolClickAt(nx, ny, clickCount = 1) {
  * Type text at normalized coordinates.
  * Click to focus → Clear field (Ctrl+A, Delete) → Insert text.
  * Handles any Unicode: Cyrillic, CJK, emoji, etc.
+ *
+ * AUTO-FALLBACK: After CDP insertText, verifies the text was actually
+ * inserted by reading the active element's value. If verification fails
+ * (e.g. CodeMirror/Monaco ignores insertText), automatically retries
+ * via toolTypeCode which tries editor API → clipboard paste → execCommand.
  */
 export async function toolTypeAt(nx, ny, text, clearFirst = true) {
   const viewport = await getViewportSize();
@@ -319,9 +325,138 @@ export async function toolTypeAt(nx, ny, text, clearFirst = true) {
     // Type text using Input.insertText (handles all Unicode)
     await cdpType(text || '');
 
+    // VERIFICATION: Check if text was actually inserted
+    // CodeMirror/Monaco/Ace ignore Input.insertText — text won't appear
+    await sleep(150);
+    try {
+      const verifyResult = await cdpSend('Runtime.evaluate', {
+        expression: `(function() {
+          var el = document.activeElement;
+          if (!el) return 'no_active_element';
+          // Check standard inputs and textareas
+          if (el.value !== undefined && el.tagName !== 'SELECT') {
+            return el.value.length > 0 ? 'ok' : 'empty';
+          }
+          // Check contenteditable (CodeMirror, etc.)
+          if (el.isContentEditable) {
+            return el.textContent.length > 0 ? 'ok' : 'empty';
+          }
+          // Check CodeMirror 6 specifically
+          var cm = el.closest && (el.closest('.cm-editor') || el.closest('.cm-content'));
+          if (cm) return 'codemirror_needs_api';
+          return 'unknown_type';
+        })()`,
+        returnByValue: true
+      });
+
+      const status = verifyResult?.result?.value;
+
+      // If we detected a code editor or text didn't appear, auto-fallback
+      if (status === 'codemirror_needs_api' || status === 'empty') {
+        broadcast({ kind: 'log', text: `⌨️ type_at verification: ${status} — auto-fallback to type_code` });
+        return await toolTypeCode(nx, ny, text || '');
+      }
+    } catch (_) {
+      // Verification failed — that's OK, assume insertText worked
+    }
+
     return { ok: true, tool: 'type_at', normalized: { x: nx, y: ny }, length: (text || '').length, cleared: clearFirst };
   } catch (e) {
-    return { ok: false, tool: 'type_at', error: e.message, normalized: { x: nx, y: ny } };
+    // If insertText threw, try type_code as last resort
+    broadcast({ kind: 'log', text: `⌨️ type_at failed (${e.message}), trying type_code fallback...` });
+    try {
+      return await toolTypeCode(nx, ny, text || '');
+    } catch (e2) {
+      return { ok: false, tool: 'type_at', error: e2.message, normalized: { x: nx, y: ny } };
+    }
+  }
+}
+
+/**
+ * Paste text at normalized coordinates via clipboard (Ctrl+V).
+ * Click to focus → Write text to clipboard → Paste via Ctrl+V.
+ *
+ * Unlike type_at (which uses Input.insertText), this tool writes the text
+ * to the system clipboard via navigator.clipboard.writeText and then
+ * dispatches a real Ctrl+V keypress. This triggers paste event handlers
+ * on web pages (e.g. React controlled inputs, code editors) that don't
+ * fire for insertText.
+ *
+ * Use case: fields where type_at doesn't work because the page listens
+ * to paste/clipboard events specifically, or for rich-text editors that
+ * parse pasted HTML/content differently from typed input.
+ *
+ * @param {number} nx — normalized X (0–1000)
+ * @param {number} ny — normalized Y (0–1000)
+ * @param {string} text — text to paste
+ */
+export async function toolPasteText(nx, ny, text) {
+  const viewport = await getViewportSize();
+  const { x, y } = normalizeCoords(nx, ny, viewport);
+  const safeText = text || '';
+
+  try {
+    try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
+
+    // 1. Click on the target element to focus it
+    await cdpClick(x, y);
+    await sleep(100);
+
+    // 2. Write text to the system clipboard via CDP Runtime.evaluate
+    //    NOTE: navigator.clipboard.writeText requires user activation,
+    //    which may not be available in CDP context. We wrap it in try/catch
+    //    and fall back to document.execCommand if it fails.
+    const escapedText = JSON.stringify(safeText);
+    let clipboardWritten = false;
+
+    try {
+      await cdpSend('Runtime.evaluate', {
+        expression: `navigator.clipboard.writeText(${escapedText})`,
+        awaitPromise: true
+      });
+      clipboardWritten = true;
+    } catch (_) {
+      // Clipboard API not available in CDP context — that's OK, try fallback
+    }
+
+    if (clipboardWritten) {
+      await sleep(50);
+
+      // 3. Dispatch Ctrl+V (trusted paste event)
+      await cdpSend('Input.dispatchKeyEvent', {
+        type: 'keyDown', key: 'v', code: 'KeyV',
+        windowsVirtualKeyCode: 86, nativeVirtualKeyCode: 86,
+        modifiers: 2 // Ctrl
+      });
+      await cdpSend('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'v', code: 'KeyV',
+        windowsVirtualKeyCode: 86, nativeVirtualKeyCode: 86,
+        modifiers: 2
+      });
+
+      return { ok: true, tool: 'paste_text', normalized: { x: nx, y: ny }, length: safeText.length };
+    }
+
+    // FALLBACK: clipboard API failed — use document.execCommand('insertText')
+    // This works in contenteditable elements and some rich text editors
+    const execResult = await cdpSend('Runtime.evaluate', {
+      expression: `(function() {
+        var el = document.activeElement || document.elementFromPoint(${x}, ${y});
+        if (!el) return false;
+        el.focus();
+        document.execCommand('selectAll', false, null);
+        return document.execCommand('insertText', false, ${escapedText});
+      })()`,
+      returnByValue: true
+    });
+
+    if (execResult?.result?.value === true) {
+      return { ok: true, tool: 'paste_text', method: 'execCommand_fallback', normalized: { x: nx, y: ny }, length: safeText.length };
+    }
+
+    return { ok: false, tool: 'paste_text', error: 'clipboard_and_execCommand_failed', normalized: { x: nx, y: ny } };
+  } catch (e) {
+    return { ok: false, tool: 'paste_text', error: e.message, normalized: { x: nx, y: ny } };
   }
 }
 
@@ -449,6 +584,325 @@ export async function toolSelectAt(nx, ny, value) {
     return { ok: false, tool: 'select_at', error: selectResult?.error || 'select_failed', value };
   } catch (e) {
     return { ok: false, tool: 'select_at', error: e.message, normalized: { x: nx, y: ny }, value };
+  }
+}
+
+/**
+ * Set value in a code editor via its native API (CodeMirror, Monaco, Ace, etc.)
+ * Falls back to clipboard paste if no editor API is detected.
+ *
+ * This is the most reliable way to insert code into code editors that
+ * ignore Input.insertText (CodeMirror, Monaco, Ace, etc.)
+ *
+ * @param {number} nx — normalized X (0–1000)
+ * @param {number} ny — normalized Y (0–1000)
+ * @param {string} text — text to set
+ * @returns {Promise<Object>} observation
+ */
+export async function toolSetValueViaApi(nx, ny, text) {
+  const viewport = await getViewportSize();
+  const { x, y } = normalizeCoords(nx, ny, viewport);
+
+  try {
+    try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
+
+    // Click to focus the editor first
+    await cdpClick(x, y);
+    await sleep(200);
+
+    // Multi-strategy script: tries all known editor APIs
+    const escapedText = JSON.stringify(text || '');
+    const script = `(function() {
+      var el = document.elementFromPoint(${x}, ${y});
+      if (!el) return { ok: false, error: 'no_element_at_point' };
+
+      // Strategy 1: CodeMirror 6 (used by Colab, modern editors)
+      // Walk up the DOM to find the .cm-editor container
+      var cmEl = el.closest('.cm-editor') || el.closest('.cm-content');
+      if (!cmEl) {
+        // Also check if element IS inside a CodeMirror editor by parent traversal
+        var p = el;
+        for (var i = 0; i < 15 && p; i++) {
+          if (p.classList && (p.classList.contains('cm-editor') || p.classList.contains('cm-content'))) {
+            cmEl = p.closest('.cm-editor') || p;
+            break;
+          }
+          p = p.parentElement;
+        }
+      }
+      if (cmEl) {
+        // CodeMirror 6: access the EditorView via internal reference
+        // CM6 stores the view on the DOM element as cmView
+        var cmView = cmEl.cmView;
+        if (!cmView) {
+          // Try alternative access: CM6 stores view in a WeakMap or via dom.cmView
+          // Walk up to find it
+          var walker = cmEl;
+          for (var j = 0; j < 5 && walker; j++) {
+            if (walker.cmView) { cmView = walker.cmView; break; }
+            walker = walker.parentElement;
+          }
+        }
+        if (cmView && cmView.view) {
+          var view = cmView.view;
+          var newCode = ${escapedText};
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: newCode }
+          });
+          return { ok: true, editor: 'codemirror6', length: newCode.length };
+        }
+
+        // CodeMirror 5 fallback (Colab older versions)
+        var cm5Wrap = el.closest('.CodeMirror') || (cmEl.closest && cmEl.closest('.CodeMirror'));
+        if (cm5Wrap && cm5Wrap.CodeMirror) {
+          var cm5 = cm5Wrap.CodeMirror;
+          cm5.setValue(${escapedText});
+          cm5.refresh();
+          return { ok: true, editor: 'codemirror5', length: (${escapedText}).length };
+        }
+      }
+
+      // Strategy 2: CodeMirror 5 (direct, without CM6 detection)
+      var cm5El = el.closest('.CodeMirror');
+      if (!cm5El) {
+        var p2 = el;
+        for (var k = 0; k < 15 && p2; k++) {
+          if (p2.classList && p2.classList.contains('CodeMirror')) { cm5El = p2; break; }
+          p2 = p2.parentElement;
+        }
+      }
+      if (cm5El && cm5El.CodeMirror) {
+        cm5El.CodeMirror.setValue(${escapedText});
+        cm5El.CodeMirror.refresh();
+        return { ok: true, editor: 'codemirror5', length: (${escapedText}).length };
+      }
+
+      // Strategy 3: Monaco Editor (VS Code web, Monaco-based editors)
+      if (typeof monaco !== 'undefined' && monaco.editor) {
+        var editors = monaco.editor.getEditors();
+        for (var m = 0; m < editors.length; m++) {
+          try {
+            var domNode = editors[m].getDomNode();
+            if (!domNode) continue;
+            var rect = domNode.getBoundingClientRect();
+            // Check if click coordinates fall within this editor
+            if (${x} >= rect.left && ${x} <= rect.right && ${y} >= rect.top && ${y} <= rect.bottom) {
+              var model = editors[m].getModel();
+              if (model) {
+                editors[m].executeEdits('webclaw', [{
+                  range: model.getFullModelRange(),
+                  text: ${escapedText}
+                }]);
+                return { ok: true, editor: 'monaco', length: (${escapedText}).length };
+              }
+            }
+          } catch (_) {}
+        }
+        // Fallback: if only one Monaco editor exists, use it
+        if (editors.length === 1 && editors[0].getModel()) {
+          var e = editors[0];
+          var m2 = e.getModel();
+          e.executeEdits('webclaw', [{ range: m2.getFullModelRange(), text: ${escapedText} }]);
+          return { ok: true, editor: 'monaco_single', length: (${escapedText}).length };
+        }
+      }
+
+      // Strategy 4: Ace Editor (used by Jupyter, older notebooks)
+      var aceEl = el.closest('.ace_editor');
+      if (!aceEl) {
+        var p3 = el;
+        for (var n = 0; n < 15 && p3; n++) {
+          if (p3.classList && p3.classList.contains('ace_editor')) { aceEl = p3; break; }
+          p3 = p3.parentElement;
+        }
+      }
+      if (aceEl && aceEl.env && aceEl.env.editor) {
+        aceEl.env.editor.setValue(${escapedText}, -1);
+        return { ok: true, editor: 'ace', length: (${escapedText}).length };
+      }
+
+      // Strategy 5: Check for any .ace_editor globally (Jupyter cells)
+      var aceEditors = document.querySelectorAll('.ace_editor');
+      if (aceEditors.length > 0) {
+        // Find the closest one to click coordinates
+        var closest = null;
+        var minDist = Infinity;
+        for (var a = 0; a < aceEditors.length; a++) {
+          var r = aceEditors[a].getBoundingClientRect();
+          var cx = (r.left + r.right) / 2;
+          var cy = (r.top + r.bottom) / 2;
+          var dist = Math.sqrt(Math.pow(${x} - cx, 2) + Math.pow(${y} - cy, 2));
+          if (dist < minDist) { minDist = dist; closest = aceEditors[a]; }
+        }
+        if (closest && closest.env && closest.env.editor && minDist < 500) {
+          closest.env.editor.setValue(${escapedText}, -1);
+          return { ok: true, editor: 'ace_nearest', length: (${escapedText}).length };
+        }
+      }
+
+      // Strategy 6: textarea / input — direct DOM value setting
+      var textarea = el.tagName === 'TEXTAREA' ? el : el.closest('textarea') || el.querySelector('textarea');
+      if (!textarea) {
+        var p4 = el;
+        for (var q = 0; q < 10 && p4; q++) {
+          if (p4.tagName === 'TEXTAREA') { textarea = p4; break; }
+          p4 = p4.parentElement;
+        }
+      }
+      if (textarea) {
+        var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+        nativeSetter.call(textarea, ${escapedText});
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        return { ok: true, editor: 'textarea', length: (${escapedText}).length };
+      }
+
+      // Strategy 7: contenteditable — set innerHTML/innerText
+      if (el.isContentEditable || el.contentEditable === 'true') {
+        el.focus();
+        document.execCommand('selectAll', false, null);
+        document.execCommand('insertText', false, ${escapedText});
+        return { ok: true, editor: 'contenteditable', length: (${escapedText}).length };
+      }
+
+      return { ok: false, error: 'no_editor_detected', element: el.tagName + '.' + (el.className || '').toString().slice(0, 100) };
+    })()`;
+
+    const result = await cdpSend('Runtime.evaluate', {
+      expression: script,
+      returnByValue: true
+    });
+
+    const val = result?.result?.value;
+    if (val?.ok) {
+      broadcast({ kind: 'log', text: `📝 Editor API: ${val.editor} — ${val.length} chars set` });
+      return { ok: true, tool: 'set_value_via_api', ...val, normalized: { x: nx, y: ny } };
+    }
+
+    return { ok: false, tool: 'set_value_via_api', error: val?.error || 'api_failed', normalized: { x: nx, y: ny } };
+  } catch (e) {
+    return { ok: false, tool: 'set_value_via_api', error: e.message, normalized: { x: nx, y: ny } };
+  }
+}
+
+/**
+ * Smart code insertion — auto-detects the editor type and uses the best method.
+ *
+ * Fallback chain:
+ *   1. Try editor native API (CodeMirror 5/6, Monaco, Ace)
+ *   2. Try clipboard paste (Ctrl+V)
+ *   3. Try document.execCommand('insertText')
+ *   4. Try Input.insertText (CDP)
+ *
+ * This is the recommended tool for inserting code/multiline text into
+ * any text field, especially code editors in Colab, Jupyter, Replit, etc.
+ *
+ * @param {number} nx — normalized X (0–1000)
+ * @param {number} ny — normalized Y (0–1000)
+ * @param {string} text — text to insert
+ * @returns {Promise<Object>} observation
+ */
+export async function toolTypeCode(nx, ny, text) {
+  if (!text) return { ok: false, tool: 'type_code', error: 'no_text' };
+
+  broadcast({ kind: 'log', text: `⌨️ type_code: ${text.length} chars at (${nx},${ny})` });
+
+  // Step 1: Try editor API first (most reliable for code editors)
+  const apiResult = await toolSetValueViaApi(nx, ny, text);
+  if (apiResult.ok) {
+    return { ...apiResult, tool: 'type_code', method: 'editor_api' };
+  }
+
+  broadcast({ kind: 'log', text: `⌨️ Editor API failed (${apiResult.error}), trying paste...` });
+
+  // Step 2: Try clipboard paste
+  const pasteResult = await toolPasteText(nx, ny, text);
+  if (pasteResult.ok) {
+    return { ...pasteResult, tool: 'type_code', method: 'clipboard_paste' };
+  }
+
+  broadcast({ kind: 'log', text: `⌨️ Clipboard paste failed (${pasteResult.error}), trying execCommand...` });
+
+  // Step 3: Try document.execCommand('insertText') — works in some contenteditable
+  const viewport = await getViewportSize();
+  const { x, y } = normalizeCoords(nx, ny, viewport);
+  try {
+    try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
+    await cdpClick(x, y);
+    await sleep(100);
+
+    // Select all first
+    await cdpSend('Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'a', code: 'KeyA',
+      windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      modifiers: 2
+    });
+    await cdpSend('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'a', code: 'KeyA',
+      windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      modifiers: 2
+    });
+    await sleep(50);
+
+    const escapedText = JSON.stringify(text);
+    const execResult = await cdpSend('Runtime.evaluate', {
+      expression: `(function() {
+        var el = document.activeElement;
+        if (!el) return false;
+        document.execCommand('selectAll', false, null);
+        return document.execCommand('insertText', false, ${escapedText});
+      })()`,
+      returnByValue: true
+    });
+
+    if (execResult?.result?.value === true) {
+      // Verify text was actually inserted
+      await sleep(100);
+      const verifyResult = await cdpSend('Runtime.evaluate', {
+        expression: `(function() {
+          var el = document.activeElement;
+          if (!el) return false;
+          var current = el.value || el.innerText || '';
+          return current.length > 0;
+        })()`,
+        returnByValue: true
+      });
+      if (verifyResult?.result?.value === true) {
+        return { ok: true, tool: 'type_code', method: 'execCommand', normalized: { x: nx, y: ny }, length: text.length };
+      }
+    }
+  } catch (_) {}
+
+  broadcast({ kind: 'log', text: `⌨️ execCommand failed, trying Input.insertText (last resort)...` });
+
+  // Step 4: Last resort — CDP Input.insertText
+  try {
+    await cdpClick(x, y);
+    await sleep(100);
+    await cdpSend('Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'a', code: 'KeyA',
+      windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      modifiers: 2
+    });
+    await cdpSend('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'a', code: 'KeyA',
+      windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      modifiers: 2
+    });
+    await sleep(50);
+    await cdpSend('Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'Delete', code: 'Delete',
+      windowsVirtualKeyCode: 46, nativeVirtualKeyCode: 46
+    });
+    await cdpSend('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Delete', code: 'Delete',
+      windowsVirtualKeyCode: 46, nativeVirtualKeyCode: 46
+    });
+    await sleep(50);
+    await cdpType(text);
+    return { ok: true, tool: 'type_code', method: 'insertText', normalized: { x: nx, y: ny }, length: text.length };
+  } catch (e) {
+    return { ok: false, tool: 'type_code', error: e.message, normalized: { x: nx, y: ny } };
   }
 }
 
@@ -1098,6 +1552,15 @@ export async function executeVisionTool(action) {
     case 'type_at':
       return await toolTypeAt(action.x, action.y, action.text || '', action.clear !== false);
 
+    case 'paste_text':
+      return await toolPasteText(action.x, action.y, action.text || '');
+
+    case 'set_value_via_api':
+      return await toolSetValueViaApi(action.x, action.y, action.text || '');
+
+    case 'type_code':
+      return await toolTypeCode(action.x, action.y, action.text || '');
+
     case 'press_key':
       return await toolPressKey(action.key);
 
@@ -1263,7 +1726,7 @@ export async function executeActionChain(chain) {
 
     // Human-like delay before action
     // Short delay for simple actions (type, click), longer for important ones
-    const isSimpleAction = (action.tool === 'type_at' || action.tool === 'press_key');
+    const isSimpleAction = (action.tool === 'type_at' || action.tool === 'paste_text' || action.tool === 'type_code' || action.tool === 'set_value_via_api' || action.tool === 'press_key');
     const isImportantAction = (action.tool === 'navigate' || action.tool === 'back');
 
     if (i > 0) {

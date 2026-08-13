@@ -15,7 +15,8 @@
     "sidePanel"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://events.atiks.org/*"
   ],
   "background": {
     "service_worker": "src/background.js",

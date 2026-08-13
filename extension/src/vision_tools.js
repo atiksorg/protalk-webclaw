@@ -31,6 +31,7 @@ import {
 import { PHASES } from './task_memory.js';
 import { getSettings } from './settings.js';
 import { startDeepSleep as persistDeepSleep, stopHeartbeat } from './persistence.js';
+import { rememberEvent, recallEvents } from './persistent_memory.js';
 
 // ============================================================
 // COORDINATE NORMALIZATION
@@ -1529,6 +1530,63 @@ export async function toolSleepUntilChange(reason) {
 }
 
 // ============================================================
+// PERSISTENT MEMORY — Events API backed long-term memory
+// ============================================================
+
+async function getCurrentPageContext() {
+  const ctx = {};
+  try {
+    const tab = await chrome.tabs.get(runtime.agentTabId);
+    ctx.currentUrl = tab?.url || '';
+    ctx.pageTitle = tab?.title || '';
+  } catch (_) {}
+  try {
+    ctx.task = runtime.task || runtime.currentTask || runtime._task || '';
+  } catch (_) {}
+  return ctx;
+}
+
+export async function toolRemember(action = {}) {
+  try {
+    const settings = await getSettings();
+    const context = await getCurrentPageContext();
+    const result = await rememberEvent(settings, {
+      kind: action.kind || 'note',
+      fields: action.fields || {}
+    }, context);
+    return {
+      ok: !!result.ok,
+      tool: 'remember',
+      stored: !!result.ok,
+      ...result
+    };
+  } catch (e) {
+    return { ok: false, tool: 'remember', error: e.message };
+  }
+}
+
+export async function toolRecall(action = {}) {
+  try {
+    const settings = await getSettings();
+    const result = await recallEvents(settings, {
+      kind: action.kind || '',
+      filters: Array.isArray(action.filters) ? action.filters : [],
+      limit: action.limit || 10
+    });
+    return {
+      ok: !!result.ok,
+      tool: 'recall',
+      hint: result.found
+        ? 'Найдены записи в постоянной памяти. Если задача запрещает дублирование — пропустите повторное действие.'
+        : 'Записей не найдено. Можно продолжать действие и после результата сохранить факт через remember.',
+      ...result
+    };
+  } catch (e) {
+    return { ok: false, tool: 'recall', error: e.message };
+  }
+}
+
+// ============================================================
 // MASTER DISPATCH — route a tool call to the right handler
 // ============================================================
 
@@ -1617,6 +1675,12 @@ export async function executeVisionTool(action) {
         action.wake_on_change !== false, // default true (watchful)
         action.reason || ''
       );
+
+    case 'remember':
+      return await toolRemember(action);
+
+    case 'recall':
+      return await toolRecall(action);
 
     case 'done':
       return { ok: true, tool: 'done', terminal: true, answer: action.answer || '' };

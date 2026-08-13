@@ -56,6 +56,11 @@ const KEY_FAST_TRACK_DELAY = 'fast_track_delay_ms';
 // v9.3 Human-like mouse movement (Bezier interpolation)
 const KEY_MOUSE_MOVE_JITTER = 'mouse_move_jitter';
 const KEY_MOUSE_MOVE_BASE_DELAY = 'mouse_move_base_delay';
+// v10.0 Persistent Memory (Events API)
+const KEY_PMEM_ENABLED = 'persistent_memory_enabled';
+const KEY_PMEM_SRC_BASE = 'persistent_memory_src_base';
+const KEY_PMEM_SRC_SUFFIX = 'persistent_memory_src_suffix';
+const KEY_PMEM_SRC = 'persistent_memory_src';
 
 const DEFAULTS = {
   auth_token: '',
@@ -99,7 +104,12 @@ const DEFAULTS = {
   fast_track_delay_ms: 100,  // Delay after paint for CSS transitions to settle (ms)
   // v9.3 Human-like mouse movement (Bezier interpolation)
   mouse_move_jitter: 1.5,      // Random deviation per step in pixels (hand tremor simulation)
-  mouse_move_base_delay: 10    // Base delay between path points in ms
+  mouse_move_base_delay: 10,   // Base delay between path points in ms
+  // v10.0 Persistent Memory (Events API)
+  persistent_memory_enabled: false,
+  persistent_memory_src_base: '',
+  persistent_memory_src_suffix: '',
+  persistent_memory_src: ''
 };
 
 function readSync() {
@@ -147,7 +157,12 @@ function readSync() {
         fast_track_delay_ms: typeof items[KEY_FAST_TRACK_DELAY] === 'number' ? items[KEY_FAST_TRACK_DELAY] : DEFAULTS.fast_track_delay_ms,
         // v9.3 Human-like mouse movement (Bezier interpolation)
         mouse_move_jitter: typeof items[KEY_MOUSE_MOVE_JITTER] === 'number' ? items[KEY_MOUSE_MOVE_JITTER] : DEFAULTS.mouse_move_jitter,
-        mouse_move_base_delay: typeof items[KEY_MOUSE_MOVE_BASE_DELAY] === 'number' ? items[KEY_MOUSE_MOVE_BASE_DELAY] : DEFAULTS.mouse_move_base_delay
+        mouse_move_base_delay: typeof items[KEY_MOUSE_MOVE_BASE_DELAY] === 'number' ? items[KEY_MOUSE_MOVE_BASE_DELAY] : DEFAULTS.mouse_move_base_delay,
+        // v10.0 Persistent Memory (Events API)
+        persistent_memory_enabled: items[KEY_PMEM_ENABLED] !== undefined ? !!items[KEY_PMEM_ENABLED] : DEFAULTS.persistent_memory_enabled,
+        persistent_memory_src_base: items[KEY_PMEM_SRC_BASE] || '',
+        persistent_memory_src_suffix: items[KEY_PMEM_SRC_SUFFIX] || '',
+        persistent_memory_src: items[KEY_PMEM_SRC] || ''
       });
     });
   });
@@ -265,6 +280,12 @@ export function setSettings(partial) {
     // v9.3 Human-like mouse movement (Bezier interpolation)
     if (partial.mouse_move_jitter !== undefined) syncPatch[KEY_MOUSE_MOVE_JITTER] = Math.max(0, Math.min(10, partial.mouse_move_jitter));
     if (partial.mouse_move_base_delay !== undefined) syncPatch[KEY_MOUSE_MOVE_BASE_DELAY] = Math.max(0, Math.min(50, partial.mouse_move_base_delay));
+
+    // v10.0 Persistent Memory (Events API)
+    if (partial.persistent_memory_enabled !== undefined) syncPatch[KEY_PMEM_ENABLED] = !!partial.persistent_memory_enabled;
+    if (partial.persistent_memory_src_base !== undefined) syncPatch[KEY_PMEM_SRC_BASE] = String(partial.persistent_memory_src_base || '').slice(0, 100);
+    if (partial.persistent_memory_src_suffix !== undefined) syncPatch[KEY_PMEM_SRC_SUFFIX] = String(partial.persistent_memory_src_suffix || '').slice(0, 20);
+    if (partial.persistent_memory_src !== undefined) syncPatch[KEY_PMEM_SRC] = String(partial.persistent_memory_src || '').slice(0, 140);
 
     // Write both stores in parallel
     let done = 0;

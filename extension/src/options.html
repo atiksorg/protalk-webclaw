@@ -262,6 +262,27 @@
   <textarea id="user_context" placeholder="Иван Петров, Frontend, 5 лет. Telegram @ivan_p. Сопроводительное: кратко, по делу, упоминать стек..."></textarea>
   <div class="hint">Этот текст автоматически подмешивается в system-prompt при каждом вызове модели.</div>
 
+  <h2>Постоянная память</h2>
+  <div class="check-row">
+    <input type="checkbox" id="persistent_memory_enabled" />
+    <div class="check-label">
+      <div class="title">🧠 Использовать постоянную память</div>
+      <div class="desc">Агент сможет записывать и искать факты через Events API: сайты, email, заявки, контакты и любые заметки между сессиями.</div>
+    </div>
+  </div>
+
+  <label for="persistent_memory_src_base">SRC памяти</label>
+  <input id="persistent_memory_src_base" autocomplete="off" placeholder="my_sales_bot" />
+  <div class="hint">Придумайте имя источника. К нему автоматически добавляется уникальный 6-символьный ID.</div>
+
+  <label for="persistent_memory_src_final">Итоговый SRC</label>
+  <input id="persistent_memory_src_final" readonly placeholder="my_sales_bot_a1b2c3" />
+  <div class="row" style="margin-top: 8px;">
+    <button id="regen_memory_suffix" type="button">🎲 Сгенерировать новый ID</button>
+    <button id="export_memory_csv" type="button">📊 Выгрузить память CSV</button>
+  </div>
+  <div class="hint">CSV выгружает последние доступные записи памяти с type=memory.</div>
+
   <h2>Бюджет токенов</h2>
   <label for="token_limit">Лимит токенов за сессию (обязательно)</label>
   <input id="token_limit" type="number" min="1000" max="50000000" step="10000" value="1000000" required />

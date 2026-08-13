@@ -34,6 +34,13 @@ WebClaw is a Chrome extension that uses AI vision to autonomously interact with 
 ### 5. Settings (settings.js)
 - Multi-source configuration (Local > Remote Gist > Sync)
 - Secure storage: `auth_token` and `api_key` are kept strictly in `chrome.storage.local`
+- Persistent Memory settings: enable flag, user SRC base, generated 6-character suffix, final Events API `src`
+
+### 6. Persistent Memory (persistent_memory.js)
+- Events API backed long-term memory via `https://events.atiks.org`
+- Stores records as `type=memory` with flexible `kind` and arbitrary fields
+- Provides agent tools `recall` and `remember` for anti-duplication workflows
+- Supports CSV export of the latest memory records from the options page
 
 ## Data Flow
 
@@ -112,6 +119,8 @@ The agent builds a hierarchical **Navigation Tree** of all visited pages during 
 | `jump_to_node(node_id)` | "Teleport" to a nav tree node by ID |
 | `mark_node(node_id, status)`| Annotate a nav tree node with a summary |
 | `sleep(sec, wake, reason)` | Smart sleep (Watchful polling or Deep hibernation) |
+| `recall(kind, filters, limit)` | Search persistent memory records before non-duplicate actions |
+| `remember(kind, fields)` | Store persistent memory facts after important actions |
 | `done(answer)` | Task complete |
 | `fail(reason)` | Task failed (e.g., Captcha block) |
 

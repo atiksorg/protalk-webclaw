@@ -3,6 +3,7 @@
 import { getSettings, setSettings, clearSettings } from './settings.js';
 import { probeRemoteConfig } from './remote_config.js';
 import { testProvider } from './providers.js';
+import { generateMemorySuffix, sanitizeSrcBase, buildMemorySrc, exportMemoryCsv } from './persistent_memory.js';
 
 const $ = (id) => document.getElementById(id);
 const providerEl = $('provider');
@@ -43,6 +44,13 @@ const viewportWidthEl = $('agent_viewport_width');
 const viewportHeightEl = $('agent_viewport_height');
 // v8.0 token budget
 const tokenLimitEl = $('token_limit');
+// v10.0 persistent memory
+const pmemEnabledEl = $('persistent_memory_enabled');
+const pmemSrcBaseEl = $('persistent_memory_src_base');
+const pmemSrcFinalEl = $('persistent_memory_src_final');
+const regenMemorySuffixBtn = $('regen_memory_suffix');
+const exportMemoryCsvBtn = $('export_memory_csv');
+let memorySuffix = '';
 
 const KNOWN = new Set([
   'xiaomi/mimo-v2.5',
@@ -195,6 +203,49 @@ function setStatus(text, cls) {
   statusEl.className = 'status' + (cls ? ' ' + cls : '');
 }
 
+function updateMemorySrcUI() {
+  const base = sanitizeSrcBase(pmemSrcBaseEl.value || '');
+  const src = buildMemorySrc({ persistent_memory_src_base: base, persistent_memory_src_suffix: memorySuffix });
+  pmemSrcFinalEl.value = src;
+  const enabled = pmemEnabledEl.checked;
+  pmemSrcBaseEl.disabled = !enabled;
+  pmemSrcFinalEl.disabled = !enabled;
+  regenMemorySuffixBtn.disabled = !enabled;
+  exportMemoryCsvBtn.disabled = !enabled || !src;
+}
+
+pmemEnabledEl.addEventListener('change', () => {
+  if (pmemEnabledEl.checked && !memorySuffix) memorySuffix = generateMemorySuffix();
+  updateMemorySrcUI();
+});
+pmemSrcBaseEl.addEventListener('input', updateMemorySrcUI);
+regenMemorySuffixBtn.addEventListener('click', () => {
+  memorySuffix = generateMemorySuffix();
+  updateMemorySrcUI();
+});
+exportMemoryCsvBtn.addEventListener('click', async () => {
+  try {
+    updateMemorySrcUI();
+    const settings = await getSettings();
+    const src = pmemSrcFinalEl.value.trim();
+    if (!src) { setStatus('Введите SRC памяти', 'err'); return; }
+    setStatus('Выгружаю память...');
+    const result = await exportMemoryCsv({ ...settings, persistent_memory_enabled: true, persistent_memory_src: src });
+    const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `webclaw-memory-${result.src}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setStatus(`Память выгружена ✓ (${result.rows.length} записей)`, 'ok');
+  } catch (err) {
+    setStatus('Ошибка выгрузки памяти: ' + err.message, 'err');
+  }
+});
+
 async function load() {
   const s = await getSettings();
   tokenEl.value = s.auth_token || '';
@@ -222,6 +273,12 @@ async function load() {
   toggleProviderFields();
   // v8.0 token budget
   tokenLimitEl.value = s.token_limit || 1000000;
+  // v10.0 persistent memory
+  pmemEnabledEl.checked = !!s.persistent_memory_enabled;
+  pmemSrcBaseEl.value = s.persistent_memory_src_base || '';
+  memorySuffix = s.persistent_memory_src_suffix || '';
+  if (pmemEnabledEl.checked && !memorySuffix) memorySuffix = generateMemorySuffix();
+  updateMemorySrcUI();
   // Load ProTalk model
   applyModelToUI(s.model || 'xiaomi/mimo-v2.5', true);
 }
@@ -250,6 +307,14 @@ saveBtn.addEventListener('click', async () => {
   // Determine auth_token: ProTalk uses tokenEl, others use token2El
   const authToken = isProTalk ? tokenEl.value.trim() : token2El.value.trim();
 
+  if (pmemEnabledEl.checked) {
+    if (!sanitizeSrcBase(pmemSrcBaseEl.value || '')) {
+      setStatus('Введите SRC памяти', 'err'); return;
+    }
+    if (!memorySuffix) memorySuffix = generateMemorySuffix();
+    updateMemorySrcUI();
+  }
+
   await setSettings({
     auth_token: authToken,
     user_email: emailEl.value.trim(),
@@ -267,7 +332,12 @@ saveBtn.addEventListener('click', async () => {
     spa_network_idle_ms: parseInt(spaNetIdleEl.value, 10) || 500,
     spa_dom_stable_ms: parseInt(spaDomStableEl.value, 10) || 300,
     agent_viewport_width: parseInt(viewportWidthEl.value, 10) || 1280,
-    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800
+    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800,
+    // v10.0 persistent memory
+    persistent_memory_enabled: pmemEnabledEl.checked,
+    persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
+    persistent_memory_src_suffix: memorySuffix,
+    persistent_memory_src: pmemSrcFinalEl.value.trim()
   });
   // v8.0 token budget — save separately to ensure it's always set
   const tokenLimit = Math.max(1000, Math.min(50000000, parseInt(tokenLimitEl.value, 10) || 1000000));
@@ -307,6 +377,12 @@ fetchRemoteBtn.addEventListener('click', async () => {
   if (c.agent_viewport_height != null) viewportHeightEl.value = c.agent_viewport_height;
   // v8.0 token budget
   if (c.token_limit != null) tokenLimitEl.value = c.token_limit;
+  // v10.0 persistent memory
+  if (c.persistent_memory_enabled !== undefined) pmemEnabledEl.checked = !!c.persistent_memory_enabled;
+  if (c.persistent_memory_src_base != null) pmemSrcBaseEl.value = c.persistent_memory_src_base;
+  if (c.persistent_memory_src_suffix != null) memorySuffix = c.persistent_memory_src_suffix;
+  if (pmemEnabledEl.checked && !memorySuffix) memorySuffix = generateMemorySuffix();
+  updateMemorySrcUI();
   setStatus('Конфиг загружен. Не забудь нажать «Сохранить».', 'ok');
 });
 
@@ -333,7 +409,12 @@ exportBtn.addEventListener('click', async () => {
     spa_network_idle_ms: parseInt(spaNetIdleEl.value, 10) || 500,
     spa_dom_stable_ms: parseInt(spaDomStableEl.value, 10) || 300,
     agent_viewport_width: parseInt(viewportWidthEl.value, 10) || 1280,
-    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800
+    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800,
+    // v10.0 persistent memory
+    persistent_memory_enabled: pmemEnabledEl.checked,
+    persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
+    persistent_memory_src_suffix: memorySuffix,
+    persistent_memory_src: pmemSrcFinalEl.value.trim()
   };
 
   // v8.0 token budget
@@ -389,6 +470,12 @@ importFileEl.addEventListener('change', async (e) => {
     if (config.agent_viewport_height != null) viewportHeightEl.value = config.agent_viewport_height;
     // v8.0 token budget
     if (config.token_limit != null) tokenLimitEl.value = config.token_limit;
+    // v10.0 persistent memory
+    if (config.persistent_memory_enabled !== undefined) pmemEnabledEl.checked = !!config.persistent_memory_enabled;
+    if (config.persistent_memory_src_base != null) pmemSrcBaseEl.value = config.persistent_memory_src_base;
+    if (config.persistent_memory_src_suffix != null) memorySuffix = config.persistent_memory_src_suffix;
+    if (pmemEnabledEl.checked && !memorySuffix) memorySuffix = generateMemorySuffix();
+    updateMemorySrcUI();
     // Update provider-specific field visibility
     toggleProviderFields();
     setStatus('Конфиг загружен из файла. Не забудь нажать «Сохранить».', 'ok');

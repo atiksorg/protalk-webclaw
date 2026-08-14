@@ -224,6 +224,34 @@ export async function cdpClick(x, y) {
 }
 
 /**
+ * Perform a trusted RIGHT click via CDP Input.dispatchMouseEvent.
+ * Opens the browser's context menu (or the page's custom context menu).
+ *
+ * HUMAN-LIKE: First moves the cursor along a Bezier curve to the target.
+ * NO PARKING: Unlike cdpClick, we do NOT send a final mouseMoved after
+ * the click — context menus appear instantly and don't need hover state.
+ *
+ * After the right-click, a context menu will appear. The AI agent should
+ * either click_at the desired menu item, or press_key("Escape") to close it.
+ * Note: native browser context menus are NOT visible in CDP screenshots,
+ * but custom JS-based context menus (most modern web apps) ARE visible.
+ */
+export async function cdpRightClick(x, y) {
+  // HUMAN-LIKE: Smooth Bezier movement to target before clicking
+  await cdpMoveMouse(x, y);
+
+  // Right-click sequence: press → release with button: 'right'
+  await sleep(50);
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x, y, button: 'right', clickCount: 1
+  });
+  await sleep(50);
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x, y, button: 'right', clickCount: 1
+  });
+}
+
+/**
  * Perform trusted keyboard input via CDP Input.insertText.
  * Uses the dedicated CDP insertText command which correctly handles
  * any Unicode characters: Cyrillic, CJK, emoji, special symbols, etc.

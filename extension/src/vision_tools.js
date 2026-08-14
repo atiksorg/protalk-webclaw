@@ -9,6 +9,7 @@
 //
 // Toolset:
 //   click_at       — Click at normalized (x, y)
+//   right_click_at — Right-click at normalized (x, y)
 //   type_at        — Click at (x, y), clear field, type text
 //   paste_text     — Click at (x, y), paste text via clipboard (Ctrl+V)
 //   press_key      — Keyboard key press
@@ -24,7 +25,7 @@
 
 import { runtime, sleep, humanDelay, humanSleep, humanThinkPause, broadcast, setIconMode } from './bus.js';
 import {
-  cdpClick, cdpType, cdpPressKey, cdpHover, cdpSend,
+  cdpClick, cdpRightClick, cdpType, cdpPressKey, cdpHover, cdpSend,
   cdpAttach, cdpDetach,
   waitPageReady, captureScreenshot
 } from './cdp.js';
@@ -273,6 +274,41 @@ export async function toolClickAt(nx, ny, clickCount = 1) {
     return observation;
   } catch (e) {
     return { ok: false, tool: 'click_at', error: e.message, normalized: { x: nx, y: ny } };
+  }
+}
+
+/**
+ * Right-click at normalized coordinates.
+ * Opens the browser's context menu (or the page's custom JS context menu).
+ * Always uses CDP for trusted events (isTrusted: true).
+ *
+ * IMPORTANT: Native browser context menus are NOT visible in CDP screenshots.
+ * Custom JS-based context menus (most modern web apps) ARE visible.
+ * After the right-click, the agent should:
+ *   1. wait(1) to let the menu appear
+ *   2. Take a screenshot (happens automatically on next step)
+ *   3. If a custom context menu is visible — click_at the desired item
+ *   4. If no menu is visible (native menu) — press_key("Escape") to dismiss
+ *
+ * @param {number} nx — normalized X (0–1000)
+ * @param {number} ny — normalized Y (0–1000)
+ */
+export async function toolRightClickAt(nx, ny) {
+  const viewport = await getViewportSize();
+  const { x, y } = normalizeCoords(nx, ny, viewport);
+
+  try {
+    try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
+
+    await cdpRightClick(x, y);
+
+    return {
+      ok: true, tool: 'right_click_at',
+      normalized: { x: nx, y: ny }, actual: { x, y },
+      hint: 'Контекстное меню вызвано. Нативное меню браузера НЕ видно на скриншотах — если ничего не появилось, это оно. Кастомное JS-меню сайта будет видно. Для взаимодействия: click_at на пункт меню или press_key("Escape") для закрытия.'
+    };
+  } catch (e) {
+    return { ok: false, tool: 'right_click_at', error: e.message, normalized: { x: nx, y: ny } };
   }
 }
 
@@ -1606,6 +1642,9 @@ export async function executeVisionTool(action) {
   switch (tool) {
     case 'click_at':
       return await toolClickAt(action.x, action.y, action.click_count || 1);
+
+    case 'right_click_at':
+      return await toolRightClickAt(action.x, action.y);
 
     case 'type_at':
       return await toolTypeAt(action.x, action.y, action.text || '', action.clear !== false);

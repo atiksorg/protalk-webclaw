@@ -85,7 +85,8 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
   const rotation = createRotationFromSettings(settings);
   runtime._modelRotation = rotation;
   if (!rotation.isSingleModel) {
-    broadcast({ kind: 'log', text: `🔄 Model rotation enabled: ${rotation.models.map(m => m.id.split('/').pop()).join(' → ')}` );
+    const modelNames = rotation.models.map(m => m.id.split('/').pop()).join(' -> ');
+    broadcast({ kind: 'log', text: 'Model rotation enabled: ' + modelNames });
   }
 
   // Visual stagnation tracking

@@ -633,7 +633,7 @@ export async function callModelWithRotation(rotation, baseSettings, userText, im
           broadcast({
             kind: 'log',
             level: 'warn',
-            text: `⏱️ Таймаут ${rotation._shortName(activeModelId)} — пробуем ${rotation._shortName(failResult.newModelId)}`
+            text: 'Timeout ' + rotation._shortName(activeModelId) + ' - trying ' + rotation._shortName(failResult.newModelId)
           });
           continue; // retry with new model
         }
@@ -646,7 +646,7 @@ export async function callModelWithRotation(rotation, baseSettings, userText, im
         broadcast({
           kind: 'log',
           level: 'warn',
-          text: `⚠️ Пустой ответ от ${rotation._shortName(activeModelId)} — рейтинг снижен`
+          text: 'Empty response from ' + rotation._shortName(activeModelId) + ' - rating decreased'
         });
         const failResult = rotation.onFailure({ critical: true });
         if (failResult.allExhausted) {
@@ -665,7 +665,7 @@ export async function callModelWithRotation(rotation, baseSettings, userText, im
         broadcast({
           kind: 'log',
           level: 'info',
-          text: `✅ Приоритетная модель восстановлена, возвращаемся на ${rotation._shortName(recovery.newModelId)}`
+          text: 'Primary model recovered, returning to ' + rotation._shortName(recovery.newModelId)
         });
       }
 
@@ -686,7 +686,7 @@ export async function callModelWithRotation(rotation, baseSettings, userText, im
       broadcast({
         kind: 'log',
         level: 'warn',
-        text: `❌ Ошибка ${rotation._shortName(activeModelId)}: ${e.message.slice(0, 100)}`
+        text: 'Error ' + rotation._shortName(activeModelId) + ': ' + e.message.slice(0, 100)
       });
 
       const failResult = rotation.onFailure({
@@ -701,7 +701,7 @@ export async function callModelWithRotation(rotation, baseSettings, userText, im
         broadcast({
           kind: 'log',
           level: 'warn',
-          text: `🔄 Переключение на ${rotation._shortName(failResult.newModelId)} (рейтинг ${rotation.models[rotation.activeIndex].rating}%)`
+          text: 'Switch to ' + rotation._shortName(failResult.newModelId) + ' (rating ' + rotation.models[rotation.activeIndex].rating + '%)'
         });
         continue; // retry with new model
       }

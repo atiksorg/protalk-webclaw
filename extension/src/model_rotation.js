@@ -208,7 +208,7 @@ export class ModelRotationManager {
       broadcast({
         kind: 'log',
         level: 'warn',
-        text: `🔄 Переключение модели: ${this._shortName(oldId)} (${active.rating}%) → ${this._shortName(newEntry.id)} (${newEntry.rating}%)`
+        text: 'Switch model: ' + this._shortName(oldId) + ' (' + active.rating + '%) -> ' + this._shortName(newEntry.id) + ' (' + newEntry.rating + '%)'
       });
 
       return {
@@ -224,7 +224,7 @@ export class ModelRotationManager {
       broadcast({
         kind: 'log',
         level: 'error',
-        text: '❌ Все модели исчерпаны (рейтинг 0%). Сессия будет остановлена.'
+        text: 'All models exhausted (rating 0%). Session will stop.'
       });
     }
 
@@ -392,7 +392,7 @@ export class ModelRotationManager {
       broadcast({
         kind: 'log',
         level: 'info',
-        text: `🔄 Возврат на приоритетную модель: ${this._shortName(primary.id)} (рейтинг ${primary.rating}%)`
+        text: 'Return to primary model: ' + this._shortName(primary.id) + ' (rating ' + primary.rating + '%)'
       });
 
       return { switched: true, newModelId: primary.id };

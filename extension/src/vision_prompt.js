@@ -30,6 +30,7 @@ export const VISION_SYSTEM_PROMPT = `Вы — автономный браузе�
 - press_key(key) — Нажать клавишу: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Space, PageDown, PageUp, Home, End.
 - scroll(direction, amount?, x?, y?) — Прокрутить страницу. direction: up|down|top|bottom. amount: пиксели (по умолчанию 300). x,y: где прокручивать (по умолчанию 500,500).
 - hover_at(x, y) — Навести мышь на координаты. Вызывает :hover CSS, раскрывает выпадающие меню и подсказки.
+- swipe(x, y, direction, distance?, duration?, humanize?) — Свайп (перетаскивание) из точки (x,y). direction: left|right|up|down. distance: длина в пикселях (по умолчанию 300). duration: скорость в мс (по умолчанию авто 250–450). humanize: {jitter?, curvature?, microPauseChance?, inertia?} — параметры имитации человеческого свайпа (дрожание, изгиб траектории, микро-паузы). Используйте для каруселей, слайдеров, swipe-to-action, мобильных приложений.
 - select_at(x, y, value) — Выбрать опцию из выпадающего списка по координатам. value: значение опции для выбора.
 - checkbox_at(x, y) — Переключить чекбокс или радиокнопку по координатам.
 - navigate(url) — Перейти по URL.

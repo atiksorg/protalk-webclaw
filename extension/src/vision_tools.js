@@ -23,7 +23,7 @@
 //   done           — Task complete
 //   fail           — Task failed
 
-import { runtime, sleep, humanDelay, humanSleep, humanThinkPause, broadcast, setIconMode } from './bus.js';
+import { runtime, sleep, humanDelay, humanSleep, humanThinkPause, broadcast, setIconMode, mouseJitter } from './bus.js';
 import {
   cdpClick, cdpRightClick, cdpType, cdpPressKey, cdpHover, cdpSend,
   cdpAttach, cdpDetach,
@@ -33,6 +33,340 @@ import { PHASES } from './task_memory.js';
 import { getSettings } from './settings.js';
 import { startDeepSleep as persistDeepSleep, stopHeartbeat } from './persistence.js';
 import { rememberEvent, recallEvents } from './persistent_memory.js';
+
+// ============================================================
+// HUMAN-LIKE SWIPE GENERATOR
+// ============================================================
+
+/**
+ * Generate a human-like swipe path with natural movement characteristics.
+ *
+ * Human swipe behavior consists of several phases:
+ *   Phase 1: Acceleration (0–20%) — finger quickly gains speed
+ *   Phase 2: Constant velocity (20–70%) — main movement with slight jitter
+ *   Phase 3: Deceleration (70–90%) — finger slows down
+ *   Phase 4: Release slide (90–100%) — slight inertia after "lifting" finger
+ *
+ * Additional humanization:
+ *   - Jitter: micro-tremor of the finger (±1–3px random offset)
+ *   - Trajectory curve: not perfectly straight, slight arc (Bezier)
+ *   - Micro-pauses: occasional 10–30ms hesitations (simulates muscle fatigue)
+ *   - Speed variation: sinusoidal speed modulation (±15%)
+ *
+ * @param {number} x0 — start X in pixels
+ * @param {number} y0 — start Y in pixels
+ * @param {number} x1 — end X in pixels
+ * @param {number} y1 — end Y in pixels
+ * @param {Object} [opts] — configuration
+ * @param {number} [opts.steps] — number of interpolation points (default: 15–25)
+ * @param {number} [opts.jitter] — jitter amount in pixels (default: 1.5–3)
+ * @param {number} [opts.durationMs] — total swipe duration in ms (default: 300–450)
+ * @param {number} [opts.curvature] — trajectory curvature (default: auto-scaled)
+ * @param {number} [opts.microPauseChance] — probability of micro-pause per step (default: 0.08)
+ * @param {boolean} [opts.inertia] — add release slide at the end (default: true)
+ * @returns {Array<{x: number, y: number, delay: number, phase: string}>}
+ */
+export function generateHumanSwipePath(x0, y0, x1, y1, opts = {}) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  // Too short distance: just one step
+  if (dist < 5) {
+    return [{ x: Math.round(x1), y: Math.round(y1), delay: 0, phase: 'instant' }];
+  }
+
+  // Steps scale with distance
+  const defaultSteps = Math.min(30, Math.max(12, Math.round(dist / 30) + 5));
+  const steps = opts.steps || defaultSteps;
+
+  // Jitter amount (in pixels): scales slightly with distance
+  const jitter = opts.jitter ?? Math.min(3, Math.max(1, dist * 0.005));
+
+  // Total duration with slight randomization
+  const baseDuration = opts.durationMs ?? (250 + Math.random() * 200); // 250–450ms
+  const avgDelay = baseDuration / steps;
+
+  // Curvature: perpendicular offset for Bezier (slight arc, like real hand movement)
+  const maxCurve = opts.curvature ?? Math.min(40, Math.max(5, dist * 0.03));
+  const perpX = -dy / (dist || 1);
+  const perpY = dx / (dist || 1);
+  const side = Math.random() > 0.5 ? 1 : -1;
+  const curveOffset = side * maxCurve * (0.3 + Math.random() * 0.7);
+
+  // Generate Bezier control points (slight arc)
+  const cp1x = x0 + dx * 0.3 + perpX * curveOffset * 0.6;
+  const cp1y = y0 + dy * 0.3 + perpY * curveOffset * 0.6;
+  const cp2x = x0 + dx * 0.7 + perpX * curveOffset * 0.3;
+  const cp2y = y0 + dy * 0.7 + perpY * curveOffset * 0.3;
+
+  // Micro-pause chance
+  const microPauseChance = opts.microPauseChance ?? 0.08;
+
+  // Phase thresholds (normalized 0–1)
+  const PHASE_ACCEL_END = 0.2;
+  const PHASE_CONST_END = 0.7;
+  const PHASE_DECEL_END = 0.9;
+
+  const path = [];
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+
+    // Determine phase
+    let phase;
+    if (t < PHASE_ACCEL_END) phase = 'accel';
+    else if (t < PHASE_CONST_END) phase = 'const';
+    else if (t < PHASE_DECEL_END) phase = 'decel';
+    else phase = 'release';
+
+    // === Speed modulation per phase ===
+    // Phase 1 (acceleration): starts slow, speeds up (ease-in)
+    // Phase 2 (constant): slight sinusoidal variation (±15%)
+    // Phase 3 (deceleration): slows down (ease-out)
+    // Phase 4 (release): very slow inertia slide
+
+    let speedFactor;
+    let delay;
+
+    if (phase === 'accel') {
+      // Ease-in: speed increases quadratically
+      const phaseT = t / PHASE_ACCEL_END;
+      speedFactor = 0.5 + phaseT * 1.5; // 0.5x → 2x speed
+      delay = Math.round(avgDelay / speedFactor);
+    } else if (phase === 'const') {
+      // Constant with sinusoidal variation (simulates muscle micro-adjustments)
+      const phaseT = (t - PHASE_ACCEL_END) / (PHASE_CONST_END - PHASE_ACCEL_END);
+      const sineModulation = Math.sin(phaseT * Math.PI * 2) * 0.15; // ±15%
+      speedFactor = 1.0 + sineModulation;
+      delay = Math.round(avgDelay / speedFactor);
+    } else if (phase === 'decel') {
+      // Ease-out: speed decreases
+      const phaseT = (t - PHASE_CONST_END) / (PHASE_DECEL_END - PHASE_CONST_END);
+      speedFactor = 1.5 - phaseT * 1.0; // 1.5x → 0.5x
+      delay = Math.round(avgDelay / speedFactor);
+    } else {
+      // Release: very slow inertia (finger lifting off)
+      const phaseT = (t - PHASE_DECEL_END) / (1 - PHASE_DECEL_END);
+      speedFactor = 0.3 + phaseT * 0.1; // 0.3x → 0.2x (very slow)
+      delay = Math.round(avgDelay / speedFactor * 2); // much slower
+    }
+
+    // === Bezier interpolation ===
+    const mt = 1 - t;
+    let px = mt * mt * mt * x0 + 3 * mt * mt * t * cp1x + 3 * mt * t * t * cp2x + t * t * t * x1;
+    let py = mt * mt * mt * y0 + 3 * mt * mt * t * cp1y + 3 * mt * t * t * cp2y + t * t * t * y1;
+
+    // === Jitter (micro-tremor) ===
+    // Skip jitter on first and last points (precise start/end)
+    if (i > 0 && i < steps) {
+      const { jx, jy } = mouseJitter(jitter);
+      px += jx;
+      py += jy;
+    } else if (i === steps) {
+      // Final point: snap exactly to target
+      px = x1;
+      py = y1;
+    }
+
+    // === Micro-pause ===
+    let microPause = 0;
+    if (i > 1 && i < steps - 1 && Math.random() < microPauseChance) {
+      microPause = Math.round(10 + Math.random() * 25); // 10–35ms hesitation
+    }
+
+    path.push({
+      x: Math.round(Math.max(0, px)),
+      y: Math.round(Math.max(0, py)),
+      delay: Math.max(1, delay + microPause),
+      phase,
+      microPause: microPause > 0
+    });
+  }
+
+  return path;
+}
+
+/**
+ * Send touch events for a swipe path via CDP.
+ * Used for mobile/PWA sites that listen to touch events.
+ *
+ * @param {Array} points — array of {x, y, delay} from generateHumanSwipePath
+ */
+async function sendTouchSwipe(points) {
+  if (points.length === 0) return;
+
+  const startPt = points[0];
+
+  // touchStart — finger touches the screen
+  await cdpSend('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x: startPt.x, y: startPt.y }]
+  });
+
+  // touchMoved — finger slides across the screen
+  for (let i = 1; i < points.length - 1; i++) {
+    const pt = points[i];
+    // Scale delay for faster execution (we don't need real-time accuracy)
+    const scaledDelay = Math.min(pt.delay, 40); // cap at 40ms per step
+    if (scaledDelay > 2) await sleep(scaledDelay * 0.7);
+
+    await cdpSend('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: pt.x, y: pt.y }]
+    });
+  }
+
+  // touchEnd — finger lifts off
+  await cdpSend('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: []
+  });
+}
+
+/**
+ * Send mouse events for a swipe path via CDP.
+ * Used for desktop sites that listen to mouse drag events.
+ *
+ * @param {Array} points — array of {x, y, delay} from generateHumanSwipePath
+ */
+async function sendMouseSwipe(points) {
+  if (points.length === 0) return;
+
+  const startPt = points[0];
+  const endPt = points[points.length - 1];
+
+  // mouseMoved to start position
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: startPt.x, y: startPt.y
+  });
+  await sleep(20);
+
+  // mousePressed — press and hold left button
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: startPt.x, y: startPt.y,
+    button: 'left', clickCount: 1
+  });
+
+  // mouseMoved — drag the mouse along the path
+  for (let i = 1; i < points.length - 1; i++) {
+    const pt = points[i];
+    const scaledDelay = Math.min(pt.delay, 40);
+    if (scaledDelay > 2) await sleep(scaledDelay * 0.7);
+
+    await cdpSend('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x: pt.x, y: pt.y,
+      button: 'left'
+    });
+  }
+
+  // mouseMoved to final position
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mouseMoved', x: endPt.x, y: endPt.y,
+    button: 'left'
+  });
+
+  // mouseReleased — release the button
+  await cdpSend('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: endPt.x, y: endPt.y,
+    button: 'left', clickCount: 1
+  });
+}
+
+/**
+ * Swipe at normalized coordinates in a direction.
+ * Simulates a human-like finger drag (touch + mouse events) for carousels,
+ * sliders, swipe-to-action, and mobile web apps.
+ *
+ * Humanization features:
+ *   - Bezier curve trajectory (not perfectly straight)
+ *   - Phase-based speed: acceleration → constant → deceleration → inertia
+ *   - Micro-tremor jitter (±1–3px per step)
+ *   - Occasional micro-pauses (10–35ms hesitations)
+ *   - Sinusoidal speed modulation (simulates muscle micro-adjustments)
+ *
+ * @param {number} nx — normalized X start position (0–1000)
+ * @param {number} ny — normalized Y start position (0–1000)
+ * @param {string} direction — 'left' | 'right' | 'up' | 'down'
+ * @param {number} [distance] — swipe distance in pixels (default: 300)
+ * @param {number} [duration] — swipe duration in ms (default: auto 250–450)
+ * @param {Object} [humanize] — humanization parameters
+ * @param {number} [humanize.jitter] — jitter amount in px (default: 1.5–3)
+ * @param {number} [humanize.curvature] — trajectory curvature (default: auto)
+ * @param {number} [humanize.microPauseChance] — pause probability 0–1 (default: 0.08)
+ * @param {boolean} [humanize.inertia] — add release slide (default: true)
+ */
+export async function toolSwipe(nx, ny, direction = 'left', distance = 300, duration, humanize = {}) {
+  const viewport = await getViewportSize();
+  const { x: startX, y: startY } = normalizeCoords(nx, ny, viewport);
+
+  // Calculate end coordinates based on direction
+  const endX = direction === 'left'  ? startX - distance :
+               direction === 'right' ? startX + distance : startX;
+  const endY = direction === 'up'    ? startY - distance :
+               direction === 'down'  ? startY + distance : startY;
+
+  // Clamp to viewport bounds
+  const clampedEndX = Math.max(10, Math.min(viewport.width - 10, endX));
+  const clampedEndY = Math.max(10, Math.min(viewport.height - 10, endY));
+
+  try {
+    // Focus agent tab
+    try { await chrome.tabs.update(runtime.agentTabId, { active: true }); } catch (_) {}
+
+    // Snapshot tab IDs before swipe (in case swipe triggers navigation)
+    const tabIdsBefore = await snapshotTabIds();
+
+    // Generate human-like swipe path
+    const points = generateHumanSwipePath(startX, startY, clampedEndX, clampedEndY, {
+      durationMs: duration,
+      jitter: humanize.jitter,
+      curvature: humanize.curvature,
+      microPauseChance: humanize.microPauseChance
+    });
+
+    broadcast({
+      kind: 'log',
+      text: `👆 Swipe ${direction}: (${startX},${startY}) → (${clampedEndX},${clampedEndY}), ${points.length} steps, humanized`
+    });
+
+    // Send both touch AND mouse events (covers mobile + desktop)
+    await sendTouchSwipe(points);
+    await sleep(50); // brief pause between touch and mouse
+    await sendMouseSwipe(points);
+
+    // Post-swipe: park mouse at end position (Anti-Blink)
+    runtime._mouseParkCoords = { x: clampedEndX, y: clampedEndY };
+    await sleep(100);
+
+    // Detect if swipe triggered navigation or new tab
+    await sleep(300);
+    const newTab = await detectNewTab(tabIdsBefore);
+
+    const result = {
+      ok: true,
+      tool: 'swipe',
+      direction,
+      distance,
+      from: { x: startX, y: startY },
+      to: { x: clampedEndX, y: clampedEndY },
+      normalized: { fromX: nx, fromY: ny },
+      steps: points.length,
+      humanized: true
+    };
+
+    if (newTab) {
+      result.newTabOpened = true;
+      result.newTabId = newTab.id;
+      result.newTabUrl = (newTab.url || '').slice(0, 200);
+      result.previousTabId = runtime.agentTabId;
+    }
+
+    return result;
+  } catch (e) {
+    return { ok: false, tool: 'swipe', error: e.message, direction };
+  }
+}
 
 // ============================================================
 // COORDINATE NORMALIZATION
@@ -1671,6 +2005,16 @@ export async function executeVisionTool(action) {
 
     case 'hover_at':
       return await toolHoverAt(action.x, action.y);
+
+    case 'swipe':
+      return await toolSwipe(
+        action.x ?? 500,
+        action.y ?? 500,
+        action.direction || 'left',
+        action.distance || 300,
+        action.duration,
+        action.humanize || {}
+      );
 
     case 'select_at':
       return await toolSelectAt(action.x, action.y, action.value || '');

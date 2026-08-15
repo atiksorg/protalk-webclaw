@@ -113,6 +113,7 @@ The agent builds a hierarchical **Navigation Tree** of all visited pages during 
 | `press_key(key)` | CDP key press (Enter, Tab, Escape, etc.) |
 | `scroll(direction, amount)` | CDP mouseWheel |
 | `hover_at(x, y)` | CDP mouseMoved (triggers `:hover` CSS) |
+| `swipe(x, y, direction, distance, duration, humanize)` | Human-like finger drag (touch + mouse events) for carousels, sliders, swipe-to-action. Features: Bezier curve trajectory, phase-based speed (acceleration → constant → deceleration → inertia), micro-tremor jitter, micro-pauses, sinusoidal speed modulation |
 | `select_at(x, y, value)` | CDP click + Runtime.evaluate to select `<option>` |
 | `checkbox_at(x, y)` | Toggle click |
 | `navigate(url)` | Tab navigation |
@@ -213,6 +214,61 @@ AI sees the options and can click_at the correct one
 
 **Settings:**
 - `fast_track_delay_ms` (default: 100ms): Delay after paint for CSS transitions to settle. Lower values capture UI faster but may miss slow animations.
+
+### Human-Like Swipe (v9.3)
+
+The swipe tool simulates natural finger drag gestures for interacting with carousels, sliders, swipe-to-action UIs, and mobile web applications. It generates physically realistic touch/mouse event sequences with multiple humanization layers.
+
+#### Dual Event System
+Every swipe sends **both** touch and mouse events in sequence:
+1. **Touch events** (`touchStart` → `touchMove` × N → `touchEnd`) — for mobile/PWA sites
+2. **Mouse events** (`mouseMoved` → `mousePressed` → `mouseMoved` × N → `mouseReleased`) — for desktop carousels
+
+This dual approach ensures compatibility with 99% of carousel/slider implementations.
+
+#### Phase-Based Speed Profile
+A human swipe consists of four distinct phases, each with characteristic speed:
+
+```
+Speed
+  ↑
+  │    ╭────────╮
+  │   ╱          ╲
+  │  ╱            ╲
+  │ ╱              ╲
+  │╱                ╲___________
+  └──────────────────────────────→ Time
+   Phase1  Phase2    Phase3  Phase4
+   Accel   Const     Decel   Release
+   (0-20%) (20-70%)  (70-90%)(90-100%)
+```
+
+| Phase | Duration | Speed Profile | Human Behavior |
+|-------|----------|---------------|----------------|
+| **Acceleration** | 0–20% | Ease-in (0.5x → 2x) | Finger gains speed quickly |
+| **Constant** | 20–70% | Sinusoidal ±15% | Main movement with micro-adjustments |
+| **Deceleration** | 70–90% | Ease-out (1.5x → 0.5x) | Finger slows down before release |
+| **Release** | 90–100% | Very slow (0.3x → 0.2x) | Inertia slide after "lifting" finger |
+
+#### Trajectory Humanization
+
+**Bezier Curvature:**
+Swipe paths are not perfectly straight — they follow a cubic Bezier curve with perpendicular offset (5–40px depending on distance). This mimics the natural arc of a human arm/hand movement.
+
+**Micro-Tremor Jitter:**
+Every intermediate point (except first and last) has ±1–3px random offset using Gaussian distribution (Box-Muller transform). This simulates the natural tremor of a human finger.
+
+**Micro-Pauses:**
+8% chance of a 10–35ms hesitation at any intermediate point. This simulates momentary muscle fatigue or attention shift during the swipe.
+
+#### Settings
+- `jitter` (default: 1.5–3px): Amount of micro-tremor. Increase for more human-like, decrease for precision.
+- `curvature` (default: auto-scaled): Max perpendicular offset. Increase for wider arcs.
+- `microPauseChance` (default: 0.08): Probability of micro-pause per step. Increase for slower, more deliberate swipes.
+- `duration` (default: auto 250–450ms): Total swipe duration. Shorter = faster swipe, longer = slower drag.
+
+#### Anti-Blink Integration
+After swipe completes, the cursor is "parked" at the end position (`runtime._mouseParkCoords`) to prevent premature closure of hover-dependent UI elements.
 
 ## Session Logging & HTML Reports
 

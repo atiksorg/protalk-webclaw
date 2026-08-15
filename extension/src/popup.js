@@ -14,6 +14,7 @@ const exportHtmlBtn = $('export-html');
 const exportApiBtn = $('export-api');
 const optionsBtn = $('options');
 const logsBtn = $('logs');
+const clearLogBtn = $('clear-log');
 const monitorBtn = $('monitor');
 const sidebarBtn = $('sidebar');
 const toggleWidgetBtn = $('toggle-widget');
@@ -94,7 +95,7 @@ async function loadSettings() {
     model: 'xiaomi/mimo-v2.5', step_cap: 200, remote_config_url: ''
   });
   modelName = v.model || 'xiaomi/mimo-v2.5';
-  stepcapEl.value = v.step_cap || 200;
+  stepcapEl.value = Number.isFinite(Number(v.step_cap)) ? Number(v.step_cap) : 200;
   configSource = v.remote_config_url ? 'remote' : 'local';
   // Restore last task/context for convenience
   const last = await chrome.storage.local.get({ last_task: '', last_context: '', last_url: '' });
@@ -348,6 +349,28 @@ optionsBtn.addEventListener('click', () => {
 logsBtn.addEventListener('click', () => {
   window.open(chrome.runtime.getURL('src/logs.html'), '_blank');
 });
+
+clearLogBtn.addEventListener('click', async () => {
+  log.textContent = '';
+  sessionData = [];
+  if (aiThoughtCard) aiThoughtCard.classList.add('hidden');
+  if (aiThoughtText) aiThoughtText.textContent = '';
+  if (aiActionText) {
+    aiActionText.textContent = '';
+    aiActionText.classList.add('hidden');
+  }
+  try {
+    await chrome.runtime.sendMessage({ kind: 'clear_logs' });
+  } catch (_) {}
+  appendLog('🧹 Логи очищены');
+});
+
+stepcapEl.addEventListener('change', async () => {
+  const stepCap = Math.max(1, Math.min(2000, parseInt(stepcapEl.value, 10) || 200));
+  stepcapEl.value = stepCap;
+  await chrome.storage.sync.set({ step_cap: stepCap });
+});
+
 monitorBtn.addEventListener('click', async () => {
   try {
     // Open Side Panel via chrome.sidePanel API (Chrome 114+)
@@ -391,20 +414,40 @@ sidebarBtn.addEventListener('click', async () => {
 });
 
 let widgetVisible = false; // track widget state for toggle
+
+function updateWidgetButton(visible) {
+  widgetVisible = !!visible;
+  toggleWidgetBtn.textContent = widgetVisible ? '🔲 Виджет ✓' : '🔲 Виджет';
+}
+
+async function syncWidgetButtonState() {
+  try {
+    const r = await chrome.runtime.sendMessage({ kind: 'get_overlay_widget_visibility' });
+    if (r?.ok) {
+      updateWidgetButton(!!r.visible);
+    } else {
+      updateWidgetButton(false);
+    }
+  } catch (_) {
+    updateWidgetButton(false);
+  }
+}
+
 toggleWidgetBtn.addEventListener('click', async () => {
   try {
     // Popup cannot talk to content scripts directly —
     // always relay through background service worker.
     const r = await chrome.runtime.sendMessage({ kind: 'toggle_overlay_widget' });
     if (r?.ok) {
-      widgetVisible = !widgetVisible;
-      toggleWidgetBtn.textContent = widgetVisible ? '🔲 Виджет ✓' : '🔲 Виджет';
+      updateWidgetButton(!!r.visible);
       appendLog(widgetVisible ? '🔲 Виджет показан' : '🔲 Виджет скрыт');
     } else {
       appendLog('Виджет недоступен: ' + (r?.error || 'нет активной вкладки'), 'err');
+      await syncWidgetButtonState();
     }
   } catch (e) {
     appendLog('Ошибка: виджет недоступен на этой странице', 'err');
+    await syncWidgetButtonState();
   }
 });
 
@@ -477,4 +520,7 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 // Initialize
 initPresets();
-loadSettings().then(() => syncWithBackground());
+loadSettings().then(async () => {
+  await syncWithBackground();
+  await syncWidgetButtonState();
+});

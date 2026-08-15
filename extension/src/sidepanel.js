@@ -44,6 +44,117 @@ function escapeHtml(s) {
   );
 }
 
+function getActionType(action) {
+  if (!action) return '';
+  return action._isChain
+    ? 'action_chain'
+    : (action.tool || action.action || action.type || '');
+}
+
+function getActionClass(actionOrType) {
+  const actionType = typeof actionOrType === 'string' ? actionOrType : getActionType(actionOrType);
+  const known = ['click_at', 'right_click_at', 'type_at', 'paste_text', 'type_code', 'set_value_via_api',
+    'scroll', 'scroll_at', 'navigate', 'done', 'fail', 'wait', 'press_key', 'hover_at', 'select_at',
+    'checkbox_at', 'back', 'forward', 'reload', 'jump_to_node', 'mark_node', 'swipe', 'remember', 'recall'];
+
+  if (actionType === 'action_chain') return 'chain';
+  if (actionType === 'thinking') return 'thinking';
+  if (!known.includes(actionType)) return 'other';
+
+  return actionType
+    .replace('_at', '')
+    .replace('right_click', 'click')
+    .replace('paste_text', 'type')
+    .replace('type_code', 'type')
+    .replace('set_value_via_api', 'type')
+    .replace('press_key', 'type')
+    .replace('checkbox', 'click')
+    .replace('swipe', 'scroll')
+    .replace('remember', 'other')
+    .replace('recall', 'other');
+}
+
+function observationHasError(obs) {
+  if (!obs) return false;
+  if (obs.ok === false || obs.error) return true;
+  if (Array.isArray(obs.results)) return obs.results.some(r => r?.ok === false || r?.error);
+  return false;
+}
+
+function renderActionBadge(action, opts = {}) {
+  const label = formatActionHuman(action);
+  const prefix = opts.prefix ? `<span style="opacity:.65;min-width:24px">${escapeHtml(opts.prefix)}</span>` : '';
+  const extra = opts.extra ? `<span style="margin-left:auto;color:#6b7280;font-size:10px">${escapeHtml(opts.extra)}</span>` : '';
+  return `
+    <div class="observation-badge ok event-block event-action">
+      ${prefix}<span>${escapeHtml(label)}</span>${extra}
+    </div>`;
+}
+
+function renderChainActions(action) {
+  if (!action?._isChain || !Array.isArray(action.actions) || action.actions.length === 0) return '';
+
+  let html = `
+    <div class="detail event-block event-action">
+      <div class="detail-label">⛓️ Действия в цепочке (${action.actions.length})</div>`;
+
+  action.actions.forEach((a, i) => {
+    html += renderActionBadge(a, { prefix: `#${i + 1}` });
+  });
+
+  html += '</div>';
+  return html;
+}
+
+function renderChainResults(observation) {
+  if (!observation || observation.tool !== 'action_chain' || !Array.isArray(observation.results)) return '';
+
+  let html = `
+    <div class="detail event-block event-observation ${observationHasError(observation) ? 'event-error' : ''}">
+      <div class="detail-label">✅ Результаты цепочки (${observation.executed || observation.results.length}/${observation.chainLength || observation.results.length})</div>`;
+
+  observation.results.forEach((result, i) => {
+    const ok = result?.ok !== false;
+    const text = result?.error
+      ? `Ошибка: ${result.error}`
+      : formatObservationHuman(result);
+    html += `
+      <div class="observation-badge ${ok ? 'ok' : 'err'} ${ok ? '' : 'event-error'}">
+        <span style="opacity:.65;min-width:24px">#${i + 1}</span>
+        <span>${escapeHtml(text)}</span>
+      </div>`;
+  });
+
+  html += '</div>';
+  return html;
+}
+
+function updateStepFilterContent(el, stepData) {
+  if (!el) return;
+
+  const blocks = el.querySelectorAll('.event-block');
+  if (activeFilter === 'all') {
+    blocks.forEach(block => { block.style.display = ''; });
+    el.style.display = '';
+    return;
+  }
+
+  let visibleBlocks = 0;
+  blocks.forEach(block => {
+    const show = activeFilter === 'thought'
+      ? block.classList.contains('event-thought')
+      : activeFilter === 'action'
+        ? block.classList.contains('event-action')
+        : activeFilter === 'error'
+          ? block.classList.contains('event-error')
+          : true;
+    block.style.display = show ? '' : 'none';
+    if (show) visibleBlocks++;
+  });
+
+  el.style.display = visibleBlocks > 0 && isStepVisible(stepData) ? '' : 'none';
+}
+
 // State
 let steps = new Map(); // step number → step data object
 let running = false;
@@ -297,13 +408,10 @@ function renderStep(stepData) {
   const existingEl = document.getElementById(`step-${num}`);
 
   // Build step card HTML with human-readable formatting
-  const hasError = !!stepData.error;
+  const hasError = !!stepData.error || observationHasError(stepData.observation);
   const humanAction = stepData.action ? formatActionHuman(stepData.action) : (stepData.thought ? '💭 Рассуждение' : '⏳ В процессе');
-  // Extract the action type from the tool field (vision_loop uses 'tool', not 'action')
-  const actionType = stepData.action?.tool || stepData.action?.action || (stepData.thought ? 'thinking' : 'unknown');
-  const actionClass = ['click_at', 'type_at', 'scroll', 'scroll_at', 'navigate', 'done', 'fail', 'wait',
-    'press_key', 'hover_at', 'select_at', 'checkbox_at', 'back', 'jump_to_node', 'mark_node'].includes(actionType)
-    ? actionType.replace('_at', '') : (actionType === 'thinking' ? 'thinking' : 'other');
+  const actionType = stepData.action ? getActionType(stepData.action) : (stepData.thought ? 'thinking' : 'unknown');
+  const actionClass = getActionClass(actionType);
 
   const time = stepData.timestamp.toLocaleTimeString();
 
@@ -320,7 +428,7 @@ function renderStep(stepData) {
   // Thought block with beautiful styling
   if (stepData.thought) {
     html += `
-      <div class="thought-block">
+      <div class="thought-block event-block event-thought">
         <div class="thought-title">💭 Ход мыслей ИИ:</div>
         <div class="thought-content">${escapeHtml(formatThought(stepData.thought))}</div>
       </div>`;
@@ -329,14 +437,16 @@ function renderStep(stepData) {
   // Human-readable action summary
   if (stepData.action) {
     html += `
-      <div class="observation-badge ${hasError ? 'err' : 'ok'}">
+      <div class="observation-badge ${hasError ? 'err' : 'ok'} event-block event-action ${hasError ? 'event-error' : ''}">
         ${escapeHtml(humanAction)}
       </div>`;
+
+    html += renderChainActions(stepData.action);
     
     // Raw JSON hidden in details spoiler
     const actionJson = JSON.stringify(stepData.action, null, 2);
     html += `
-      <details class="detail">
+      <details class="detail event-block event-action">
         <summary class="detail-label" style="cursor:pointer">📋 Технические детали</summary>
         <pre>${escapeHtml(actionJson)}</pre>
       </details>`;
@@ -346,21 +456,22 @@ function renderStep(stepData) {
   if (stepData.observation) {
     const obsOk = stepData.observation.ok !== false;
     const humanObs = formatObservationHuman(stepData.observation);
+    html += renderChainResults(stepData.observation);
     html += `
-      <div class="observation-badge ${obsOk ? 'ok' : 'err'}">
+      <div class="observation-badge ${obsOk ? 'ok' : 'err'} event-block event-observation ${obsOk ? '' : 'event-error'}">
         ${escapeHtml(humanObs)}
       </div>`;
   }
 
   // Error
   if (stepData.error) {
-    html += `<div class="observation-badge err">❌ ${escapeHtml(stepData.error)}</div>`;
+    html += `<div class="observation-badge err event-block event-error">❌ ${escapeHtml(stepData.error)}</div>`;
   }
 
   // Log lines
   if (stepData.logLines.length > 0) {
     html += `
-      <details class="detail">
+      <details class="detail event-block event-log">
         <summary class="detail-label" style="cursor:pointer">📋 Логи шага (${stepData.logLines.length})</summary>
         <pre>${stepData.logLines.map(l => escapeHtml(l)).join('\n')}</pre>
       </details>`;
@@ -376,19 +487,15 @@ function renderStep(stepData) {
 
   html += '</div>';
 
-  // Apply filter visibility
-  const isVisible = isStepVisible(stepData);
-
   if (existingEl) {
     existingEl.innerHTML = html;
     existingEl.className = `step-card${hasError ? ' has-error' : ''}`;
-    existingEl.style.display = isVisible ? '' : 'none';
+    updateStepFilterContent(existingEl, stepData);
   } else {
     const card = document.createElement('div');
     card.id = `step-${num}`;
     card.className = `step-card${hasError ? ' has-error' : ''}`;
     card.innerHTML = html;
-    card.style.display = isVisible ? '' : 'none';
     timeline.appendChild(card);
 
     // Hide empty state
@@ -400,6 +507,8 @@ function renderStep(stepData) {
       body.classList.add('open');
     }
 
+    updateStepFilterContent(card, stepData);
+
     // Auto-scroll to latest
     timeline.scrollTop = timeline.scrollHeight;
   }
@@ -408,8 +517,8 @@ function renderStep(stepData) {
 function isStepVisible(stepData) {
   if (activeFilter === 'all') return true;
   if (activeFilter === 'thought') return !!stepData.thought;
-  if (activeFilter === 'action') return !!stepData.action && (stepData.action.tool || stepData.action.action) !== 'thinking';
-  if (activeFilter === 'error') return !!stepData.error;
+  if (activeFilter === 'action') return !!stepData.action && getActionType(stepData.action) !== 'thinking';
+  if (activeFilter === 'error') return !!stepData.error || observationHasError(stepData.observation);
   return true;
 }
 
@@ -419,11 +528,11 @@ function applyFilter(filter) {
   document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.filter === filter);
   });
-  // Show/hide steps
+  // Show/hide relevant blocks inside steps
   for (const [num, stepData] of steps) {
     const el = document.getElementById(`step-${num}`);
     if (el) {
-      el.style.display = isStepVisible(stepData) ? '' : 'none';
+      updateStepFilterContent(el, stepData);
     }
   }
 }

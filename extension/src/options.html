@@ -146,22 +146,7 @@
 
     <label for="model_protalk">Модель</label>
     <select id="model_protalk">
-      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
-      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
-      
-      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
-      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
-      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
-      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
-      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
-      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
-    
-      <option value="anymodel/cc/claude-sonnet-5">anymodel/cc/claude-sonnet-5</option>
-      <option value="anymodel/gc/gemini-3.1-flash-lite-preview">anymodel/gc/gemini-3.1-flash-lite-preview</option>
-      <option value="anymodel/ag/gemini-3.5-flash-low">anymodel/ag/gemini-3.5-flash-low</option>
-      <option value="anymodel/ag/gemini-3.5-flash-extra-low">anymodel/ag/gemini-3.5-flash-extra-low</option>
-
-      <option value="__custom__">Другая (ввести вручную)...</option>
+      <!-- заполняется из JS через populateModelSelect() -->
     </select>
     <input id="model_protalk_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
     <div class="hint">Модель, которая будет использоваться через ProTalk Async Router.</div>
@@ -187,17 +172,7 @@
 
     <label for="model">Модель</label>
     <select id="model">
-      
-      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
-      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
-      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
-      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
-      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
-      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
-      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
-
-      <option value="meta-llama/llama-3.2-90b-vision-instruct">meta-llama/llama-3.2-90b-vision-instruct</option>
-      <option value="__custom__">Другая (ввести вручную)...</option>
+      <!-- заполняется из JS через populateModelSelect() -->
     </select>
     <input id="model_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
 
@@ -226,16 +201,7 @@
   <div id="fallback_model_0_row" style="margin-top: 10px;">
     <label for="fallback_model_0">Резервная модель 1</label>
     <select id="fallback_model_0">
-      <option value="">— не выбрана —</option>
-      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
-      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
-      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
-      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
-      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
-      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
-      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
-      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
-      <option value="__custom__">Другая (ввести вручную)...</option>
+      <!-- заполняется из JS через populateModelSelect() -->
     </select>
     <input id="fallback_model_0_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
   </div>
@@ -243,16 +209,7 @@
   <div id="fallback_model_1_row" style="margin-top: 10px;">
     <label for="fallback_model_1">Резервная модель 2</label>
     <select id="fallback_model_1">
-      <option value="">— не выбрана —</option>
-      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
-      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
-      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
-      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
-      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
-      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
-      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
-      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
-      <option value="__custom__">Другая (ввести вручную)...</option>
+      <!-- заполняется из JS через populateModelSelect() -->
     </select>
     <input id="fallback_model_1_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
   </div>
@@ -260,16 +217,7 @@
   <div id="fallback_model_2_row" style="margin-top: 10px;">
     <label for="fallback_model_2">Резервная модель 3</label>
     <select id="fallback_model_2">
-      <option value="">— не выбрана —</option>
-      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
-      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
-      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
-      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
-      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
-      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
-      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
-      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
-      <option value="__custom__">Другая (ввести вручную)...</option>
+      <!-- заполняется из JS через populateModelSelect() -->
     </select>
     <input id="fallback_model_2_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
   </div>

@@ -450,6 +450,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             currentSleep: runtime._currentSleep || null
           });
           break;
+        case 'clear_logs':
+          runtime._logBuffer = [];
+          sendResponse({ ok: true });
+          break;
         case 'openLogs': {
           const url = chrome.runtime.getURL('src/logs.html');
           const tabs = await chrome.tabs.query({ url });
@@ -500,8 +504,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 break;
               }
               try {
-                await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
-                sendResponse({ ok: true });
+                const resp = await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
+                sendResponse({ ok: true, visible: !!resp?.visible });
               } catch (innerErr) {
                 // Content script may not be loaded yet on this page — try injecting it
                 try {
@@ -510,8 +514,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     files: ['src/overlay_widget.js']
                   });
                   // Now retry the toggle
-                  await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
-                  sendResponse({ ok: true });
+                  const resp = await chrome.tabs.sendMessage(tab.id, { kind: 'toggle_widget_visibility' });
+                  sendResponse({ ok: true, visible: !!resp?.visible });
                 } catch (injectErr) {
                   sendResponse({ ok: false, error: 'Виджет недоступен на этой странице: ' + injectErr.message });
                 }
@@ -521,6 +525,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
           } catch (e) {
             sendResponse({ ok: false, error: 'content_script_unavailable: ' + e.message });
+          }
+          break;
+        }
+        case 'get_overlay_widget_visibility': {
+          // Read real overlay visibility from the active tab.
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id) {
+              sendResponse({ ok: false, error: 'no_active_tab' });
+              break;
+            }
+            if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:'))) {
+              sendResponse({ ok: false, error: 'system_page' });
+              break;
+            }
+            try {
+              const resp = await chrome.tabs.sendMessage(tab.id, { kind: 'get_widget_visibility' });
+              sendResponse({ ok: true, visible: !!resp?.visible });
+            } catch (innerErr) {
+              sendResponse({ ok: false, error: 'widget_unavailable' });
+            }
+          } catch (e) {
+            sendResponse({ ok: false, error: e.message });
           }
           break;
         }

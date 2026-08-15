@@ -159,7 +159,9 @@ function truncate(str, max) {
 export function formatActionHuman(action) {
   if (!action) return '⚙️ Неизвестное действие';
   
-  const tool = action.tool || action.action || action.type || '';
+  const tool = action._isChain
+    ? 'action_chain'
+    : (action.tool || action.action || action.type || '');
   
   // Try specific formatter
   const formatter = ACTION_FORMATTERS[tool];

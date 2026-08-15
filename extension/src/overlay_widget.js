@@ -902,9 +902,16 @@
     // Handle widget toggle from popup (via background relay) — no _agentEvent needed.
     // This MUST be before the _agentEvent check, otherwise Chrome treats the
     // unhandled message as "no receiver" and throws "Could not establish connection".
+    if (msg && msg.kind === 'get_widget_visibility') {
+      sendResponse({ ok: true, visible: overlay.style.display !== 'none' });
+      return true;
+    }
+
     if (msg && (msg.kind === 'toggle_widget' || msg.kind === 'toggle_widget_visibility')) {
+      let visible;
       if (widgetDismissed || overlay.style.display === 'none') {
         showWidget();
+        visible = true;
         // If agent is idle, still show the widget briefly with empty state
         if (!agentRunning) {
           showEmpty();
@@ -916,8 +923,9 @@
         }
       } else {
         hideWidget();
+        visible = false;
       }
-      sendResponse({ ok: true });
+      sendResponse({ ok: true, visible });
       return true;
     }
 

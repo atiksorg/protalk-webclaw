@@ -5,6 +5,34 @@ import { probeRemoteConfig } from './remote_config.js';
 import { testProvider } from './providers.js';
 import { generateMemorySuffix, sanitizeSrcBase, buildMemorySrc, exportMemoryCsv } from './persistent_memory.js';
 
+// ── Единый список всех моделей (source of truth) ──
+const ALL_MODELS = [
+  'google/gemini-3.7-flash',
+  'xiaomi/mimo-v2.5',
+  'moonshotai/kimi-k2.7-code',
+  'google/gemini-3.5-flash',
+  'openai/gpt-5.6-luna',
+  'google/gemini-3.1-flash-lite-preview',
+  'qwen/qwen3.7-flash',
+  'google/gemini-2.5-pro',
+  'meta-llama/llama-3.2-90b-vision-instruct',
+  'anymodel/cc/claude-sonnet-5',
+  'anymodel/gc/gemini-3.1-flash-lite-preview',
+  'anymodel/ag/gemini-3.5-flash-low',
+  'anymodel/ag/gemini-3.5-flash-extra-low',
+];
+const KNOWN = new Set(ALL_MODELS);
+
+/** Заполнить <select> опциями из ALL_MODELS */
+function populateModelSelect(sel, { includeEmpty = false } = {}) {
+  const prev = sel.value;
+  sel.innerHTML = '';
+  if (includeEmpty) sel.add(new Option('— не выбрана —', ''));
+  for (const m of ALL_MODELS) sel.add(new Option(m, m));
+  sel.add(new Option('Другая (ввести вручную)...', '__custom__'));
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
 const $ = (id) => document.getElementById(id);
 const providerEl = $('provider');
 const apiBaseUrlEl = $('api_base_url');
@@ -61,17 +89,10 @@ const regenMemorySuffixBtn = $('regen_memory_suffix');
 const exportMemoryCsvBtn = $('export_memory_csv');
 let memorySuffix = '';
 
-const KNOWN = new Set([
-  'google/gemini-3.7-flash',
-  'xiaomi/mimo-v2.5',
-  'moonshotai/kimi-k2.7-code',
-  'google/gemini-3.5-flash',
-  'openai/gpt-5.6-luna',
-  'google/gemini-3.1-flash-lite-preview',
-  'qwen/qwen3.7-flash',
-  'google/gemini-2.5-pro',
-  'meta-llama/llama-3.2-90b-vision-instruct'
-]);
+// ── Заполняем все <select> моделей из единого источника ──
+populateModelSelect(modelProtalkEl);
+populateModelSelect(modelEl);
+for (const { sel } of fallbackModelEls) populateModelSelect(sel, { includeEmpty: true });
 
 function effectiveModel() {
   const isProTalk = providerEl.value === 'protalk';
@@ -81,28 +102,15 @@ function effectiveModel() {
   return sel.value;
 }
 
-/**
- * Read effective fallback model list from UI selects.
- * Returns array of non-empty model IDs (up to 3).
- */
 function effectiveFallbackModels() {
-  const result = [];
-  for (let i = 0; i < fallbackModelEls.length; i++) {
-    const { sel, custom } = fallbackModelEls[i];
-    let val = '';
-    if (sel.value === '__custom__') {
-      val = (custom.value || '').trim();
-    } else if (sel.value) {
-      val = sel.value;
-    }
-    result.push(val);
-  }
-  return result;
+  return fallbackModelEls.map(({ sel, custom }) => {
+    if (sel.value === '__custom__') return (custom.value || '').trim();
+    return sel.value || '';
+  });
 }
 
-function applyModelToUI(model, isProTalk) {
-  const sel = isProTalk ? modelProtalkEl : modelEl;
-  const custom = isProTalk ? modelProtalkCustomEl : modelCustomEl;
+/** Универсально установить модель в <select> + custom input */
+function applyModelToSelect(sel, custom, model) {
   if (KNOWN.has(model)) {
     sel.value = model;
     custom.style.display = 'none';
@@ -113,17 +121,19 @@ function applyModelToUI(model, isProTalk) {
   }
 }
 
-modelEl.addEventListener('change', () => {
-  modelCustomEl.style.display = modelEl.value === '__custom__' ? '' : 'none';
-});
+function applyModelToUI(model, isProTalk) {
+  const sel = isProTalk ? modelProtalkEl : modelEl;
+  const custom = isProTalk ? modelProtalkCustomEl : modelCustomEl;
+  applyModelToSelect(sel, custom, model);
+}
 
-modelProtalkEl.addEventListener('change', () => {
-  modelProtalkCustomEl.style.display = modelProtalkEl.value === '__custom__' ? '' : 'none';
-});
-
-// Fallback model selects: show/hide custom input
-for (let i = 0; i < fallbackModelEls.length; i++) {
-  const { sel, custom } = fallbackModelEls[i];
+// Show/hide custom input on change for all model selects
+const allModelPairs = [
+  { sel: modelEl, custom: modelCustomEl },
+  { sel: modelProtalkEl, custom: modelProtalkCustomEl },
+  ...fallbackModelEls
+];
+for (const { sel, custom } of allModelPairs) {
   sel.addEventListener('change', () => {
     custom.style.display = sel.value === '__custom__' ? '' : 'none';
   });
@@ -322,18 +332,8 @@ async function load() {
   const fb = Array.isArray(s.fallback_models) ? s.fallback_models : [];
   for (let i = 0; i < fallbackModelEls.length; i++) {
     const { sel, custom } = fallbackModelEls[i];
-    const fbModel = fb[i] || '';
-    if (fbModel && KNOWN.has(fbModel)) {
-      sel.value = fbModel;
-      custom.style.display = 'none';
-    } else if (fbModel) {
-      sel.value = '__custom__';
-      custom.style.display = '';
-      custom.value = fbModel;
-    } else {
-      sel.value = '';
-      custom.style.display = 'none';
-    }
+    applyModelToSelect(sel, custom, fb[i] || '');
+    if (!fb[i]) { sel.value = ''; custom.style.display = 'none'; }
   }
   switchThresholdEl.value = s.switch_threshold ?? 60;
   recoveryThresholdEl.value = s.recovery_threshold ?? 80;
@@ -544,17 +544,8 @@ importFileEl.addEventListener('change', async (e) => {
       for (let i = 0; i < fallbackModelEls.length; i++) {
         const { sel, custom } = fallbackModelEls[i];
         const fbModel = config.fallback_models[i] || '';
-        if (fbModel && KNOWN.has(fbModel)) {
-          sel.value = fbModel;
-          custom.style.display = 'none';
-        } else if (fbModel) {
-          sel.value = '__custom__';
-          custom.style.display = '';
-          custom.value = fbModel;
-        } else {
-          sel.value = '';
-          custom.style.display = 'none';
-        }
+        applyModelToSelect(sel, custom, fbModel);
+        if (!fbModel) { sel.value = ''; custom.style.display = 'none'; }
       }
     }
     if (config.switch_threshold != null) switchThresholdEl.value = config.switch_threshold;

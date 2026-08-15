@@ -583,6 +583,138 @@ export async function callModelWithBackoff(settings, userText, imageDataUrl, { o
 }
 
 /**
+ * Call model with smart rotation across fallback models.
+ *
+ * Wraps callModelWithBackoff with ModelRotationManager integration:
+ * - On success: rewards active model, checks if primary recovered
+ * - On failure: penalizes active model, switches to next if available
+ * - On all-exhausted: throws error to stop the session
+ *
+ * @param {ModelRotationManager} rotation — model rotation manager
+ * @param {Object} baseSettings — full settings object
+ * @param {string} userText — prompt text
+ * @param {string|null} imageDataUrl — screenshot data URL
+ * @param {Object} opts — same as callModelWithBackoff opts
+ * @returns {Promise<{content, reasoning, tokensUsed, timedOut?, modelId: string}>}
+ */
+export async function callModelWithRotation(rotation, baseSettings, userText, imageDataUrl, opts = {}) {
+  // Single model (no rotation possible) — just call directly
+  if (rotation.isSingleModel) {
+    const result = await callModelWithBackoff(baseSettings, userText, imageDataUrl, opts);
+    // Still track success for timeout handling
+    if (!result.timedOut) {
+      rotation.onSuccess();
+    }
+    return { ...result, modelId: rotation.getActiveModelId() };
+  }
+
+  // Multi-model rotation loop
+  let attempts = 0;
+  const maxAttempts = rotation.models.length; // try each model at most once per rotation cycle
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    const activeModelId = rotation.getActiveModelId();
+    const activeModel = rotation.getActiveModel();
+
+    // Build settings with the current active model
+    const modelSettings = { ...baseSettings, model: activeModelId };
+
+    try {
+      const result = await callModelWithBackoff(modelSettings, userText, imageDataUrl, opts);
+
+      // Timed out — treat as failure for rotation purposes
+      if (result.timedOut) {
+        const failResult = rotation.onFailure();
+        if (failResult.allExhausted) {
+          throw new Error('all_models_exhausted_timeout');
+        }
+        if (failResult.switched) {
+          broadcast({
+            kind: 'log',
+            level: 'warn',
+            text: `⏱️ Таймаут ${rotation._shortName(activeModelId)} — пробуем ${rotation._shortName(failResult.newModelId)}`
+          });
+          continue; // retry with new model
+        }
+        // No switch possible (hysteresis) — return the timed-out result as-is
+        return { ...result, modelId: activeModelId };
+      }
+
+      // Empty content — treat as failure
+      if (!result.content || result.content.trim() === '') {
+        broadcast({
+          kind: 'log',
+          level: 'warn',
+          text: `⚠️ Пустой ответ от ${rotation._shortName(activeModelId)} — рейтинг снижен`
+        });
+        const failResult = rotation.onFailure({ critical: true });
+        if (failResult.allExhausted) {
+          throw new Error('all_models_exhausted_empty');
+        }
+        if (failResult.switched) {
+          continue; // retry with new model
+        }
+        // Return empty result — vision_loop will handle as unparseable
+        return { ...result, modelId: activeModelId };
+      }
+
+      // Success! Reward model and check recovery
+      const recovery = rotation.onSuccess();
+      if (recovery.switched) {
+        broadcast({
+          kind: 'log',
+          level: 'info',
+          text: `✅ Приоритетная модель восстановлена, возвращаемся на ${rotation._shortName(recovery.newModelId)}`
+        });
+      }
+
+      return { ...result, modelId: activeModelId };
+
+    } catch (e) {
+      if (e.message === 'aborted') throw e;
+
+      // Check if this is a rotation-worthy error
+      const isRotatable = e.transient ||
+        /429|5\d{2}|timeout|create_task_http|openai_http|anthropic_http|ollama_http/.test(e.message);
+
+      if (!isRotatable) {
+        // Non-transient error (e.g. auth failure, invalid request) — don't rotate
+        throw e;
+      }
+
+      broadcast({
+        kind: 'log',
+        level: 'warn',
+        text: `❌ Ошибка ${rotation._shortName(activeModelId)}: ${e.message.slice(0, 100)}`
+      });
+
+      const failResult = rotation.onFailure({
+        critical: /5\d{2}/.test(e.message)
+      });
+
+      if (failResult.allExhausted) {
+        throw new Error('all_models_exhausted: ' + e.message);
+      }
+
+      if (failResult.switched) {
+        broadcast({
+          kind: 'log',
+          level: 'warn',
+          text: `🔄 Переключение на ${rotation._shortName(failResult.newModelId)} (рейтинг ${rotation.models[rotation.activeIndex].rating}%)`
+        });
+        continue; // retry with new model
+      }
+
+      // Hysteresis prevented switch — re-throw
+      throw e;
+    }
+  }
+
+  throw new Error('all_models_tried_without_success');
+}
+
+/**
  * Test the connection for a given provider/settings combination.
  * Returns { ok: true } or { ok: false, error }.
  */

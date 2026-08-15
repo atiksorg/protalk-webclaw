@@ -13,8 +13,9 @@
 // consecutive screenshots to detect when the screen hasn't changed.
 
 import { getSettings } from './settings.js';
-import { callModelWithBackoff } from './providers.js';
+import { callModelWithRotation } from './providers.js';
 import { runtime, sleep, broadcast, STEP_CAP_DEFAULT, STEP_DELAY_MS, MAX_HISTORY, setIconMode, MODEL_TIMEOUT_MS } from './bus.js';
+import { createRotationFromSettings } from './model_rotation.js';
 import { waitPageReady, waitPageReadyFast, captureScreenshot } from './cdp.js';
 import { executeVisionTool, executeActionChain, toolEndSubTask } from './vision_tools.js';
 import {
@@ -79,6 +80,13 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
 
   memory.startedAt = memory.startedAt || Date.now();
   memory.setPhase(PHASES.EXECUTING);
+
+  // Initialize model rotation manager
+  const rotation = createRotationFromSettings(settings);
+  runtime._modelRotation = rotation;
+  if (!rotation.isSingleModel) {
+    broadcast({ kind: 'log', text: `🔄 Model rotation enabled: ${rotation.models.map(m => m.id.split('/').pop()).join(' → ')}` );
+  }
 
   // Visual stagnation tracking
   let prevScreenshotHash = '';
@@ -188,7 +196,7 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
       try {
         broadcast({ kind: 'model_call_start', step: runtime.step });
         modelCallStart = Date.now();
-        const out = await callModelWithBackoff(settings, userMessage, screenshot, {
+        const out = await callModelWithRotation(rotation, settings, userMessage, screenshot, {
           abortCheck: () => runtime.abortFlag,
           onLog: (text) => broadcast({ kind: 'log', text }),
           sessionLogger,
@@ -196,7 +204,8 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
         });
         modelText = out.content;
         const modelDuration = Date.now() - modelCallStart;
-        broadcast({ kind: 'model_call_end', step: runtime.step, duration: modelDuration, tokensUsed: out.tokensUsed || 0 });
+        const modelLabel = out.modelId ? ` [${out.modelId.split('/').pop()}]` : '';
+        broadcast({ kind: 'model_call_end', step: runtime.step, duration: modelDuration, tokensUsed: out.tokensUsed || 0, modelId: out.modelId });
 
         // ============================================================
         // SW SURVIVAL: Handle model timeout gracefully
@@ -264,6 +273,13 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
         broadcast({ kind: 'log', level: 'error', text: 'model call failed: ' + e.message });
         if (sessionLogger) sessionLogger.logError(e);
         if (e.message === 'aborted') break;
+        // All models exhausted — critical failure, stop session
+        if (e.message.startsWith('all_models_exhausted')) {
+          broadcast({ kind: 'log', level: 'error', text: `❌ ${e.message}` });
+          runtime.running = false;
+          await setIconMode('error');
+          return { ok: false, reason: e.message, steps: runtime.step };
+        }
         await saveState(runtime, memory);
         await sleep(STEP_DELAY_MS * 2);
         continue;

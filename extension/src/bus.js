@@ -52,6 +52,8 @@ export const runtime = {
   _modelTimeoutCount: 0,
   // Current sleep info (for UI rehydration on pages loaded mid-sleep)
   _currentSleep: null,
+  // Model rotation manager (ModelRotationManager instance, ephemeral)
+  _modelRotation: null,
   // Persistence: ephemeral references (NOT serialized, re-created on wake)
   _memory: null,
   _sessionLogger: null,
@@ -337,7 +339,8 @@ export function broadcast(msg) {
       msg.kind === 'agent_thought' || msg.kind === 'model_call_start' ||
       msg.kind === 'model_call_end' || msg.kind === 'api_call' ||
       msg.kind === 'infra' || msg.kind === 'screenshot_captured' ||
-      msg.kind === 'sleep_started' || msg.kind === 'sleep_ended' || msg.kind === 'force_wake') {
+      msg.kind === 'sleep_started' || msg.kind === 'sleep_ended' || msg.kind === 'force_wake' ||
+      msg.kind === 'model_rotation') {
     runtime._logBuffer.push(msg);
     if (runtime._logBuffer.length > runtime._logBufferMax) {
       runtime._logBuffer.splice(0, runtime._logBuffer.length - runtime._logBufferMax);

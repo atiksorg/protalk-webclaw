@@ -56,6 +56,11 @@ const KEY_FAST_TRACK_DELAY = 'fast_track_delay_ms';
 // v9.3 Human-like mouse movement (Bezier interpolation)
 const KEY_MOUSE_MOVE_JITTER = 'mouse_move_jitter';
 const KEY_MOUSE_MOVE_BASE_DELAY = 'mouse_move_base_delay';
+// v11.0 Model Rotation (fallback models with stability ratings)
+const KEY_FALLBACK_MODELS = 'fallback_models';
+const KEY_SWITCH_THRESHOLD = 'switch_threshold';
+const KEY_RECOVERY_THRESHOLD = 'recovery_threshold';
+
 // v10.0 Persistent Memory (Events API)
 const KEY_PMEM_ENABLED = 'persistent_memory_enabled';
 const KEY_PMEM_SRC_BASE = 'persistent_memory_src_base';
@@ -105,6 +110,10 @@ const DEFAULTS = {
   // v9.3 Human-like mouse movement (Bezier interpolation)
   mouse_move_jitter: 1.5,      // Random deviation per step in pixels (hand tremor simulation)
   mouse_move_base_delay: 10,   // Base delay between path points in ms
+  // v11.0 Model Rotation (fallback models with stability ratings)
+  fallback_models: [],              // Array of fallback model IDs (up to 3)
+  switch_threshold: 60,             // Switch away when active model rating drops below this
+  recovery_threshold: 80,           // Return to primary when its rating recovers above this
   // v10.0 Persistent Memory (Events API)
   persistent_memory_enabled: false,
   persistent_memory_src_base: '',
@@ -158,6 +167,10 @@ function readSync() {
         // v9.3 Human-like mouse movement (Bezier interpolation)
         mouse_move_jitter: typeof items[KEY_MOUSE_MOVE_JITTER] === 'number' ? items[KEY_MOUSE_MOVE_JITTER] : DEFAULTS.mouse_move_jitter,
         mouse_move_base_delay: typeof items[KEY_MOUSE_MOVE_BASE_DELAY] === 'number' ? items[KEY_MOUSE_MOVE_BASE_DELAY] : DEFAULTS.mouse_move_base_delay,
+        // v11.0 Model Rotation (fallback models)
+        fallback_models: Array.isArray(items[KEY_FALLBACK_MODELS]) ? items[KEY_FALLBACK_MODELS].slice(0, 3) : DEFAULTS.fallback_models,
+        switch_threshold: typeof items[KEY_SWITCH_THRESHOLD] === 'number' ? items[KEY_SWITCH_THRESHOLD] : DEFAULTS.switch_threshold,
+        recovery_threshold: typeof items[KEY_RECOVERY_THRESHOLD] === 'number' ? items[KEY_RECOVERY_THRESHOLD] : DEFAULTS.recovery_threshold,
         // v10.0 Persistent Memory (Events API)
         persistent_memory_enabled: items[KEY_PMEM_ENABLED] !== undefined ? !!items[KEY_PMEM_ENABLED] : DEFAULTS.persistent_memory_enabled,
         persistent_memory_src_base: items[KEY_PMEM_SRC_BASE] || '',
@@ -280,6 +293,11 @@ export function setSettings(partial) {
     // v9.3 Human-like mouse movement (Bezier interpolation)
     if (partial.mouse_move_jitter !== undefined) syncPatch[KEY_MOUSE_MOVE_JITTER] = Math.max(0, Math.min(10, partial.mouse_move_jitter));
     if (partial.mouse_move_base_delay !== undefined) syncPatch[KEY_MOUSE_MOVE_BASE_DELAY] = Math.max(0, Math.min(50, partial.mouse_move_base_delay));
+
+    // v11.0 Model Rotation (fallback models)
+    if (partial.fallback_models !== undefined) syncPatch[KEY_FALLBACK_MODELS] = Array.isArray(partial.fallback_models) ? partial.fallback_models.filter(Boolean).slice(0, 3) : [];
+    if (partial.switch_threshold !== undefined) syncPatch[KEY_SWITCH_THRESHOLD] = Math.max(10, Math.min(90, partial.switch_threshold));
+    if (partial.recovery_threshold !== undefined) syncPatch[KEY_RECOVERY_THRESHOLD] = Math.max(30, Math.min(100, partial.recovery_threshold));
 
     // v10.0 Persistent Memory (Events API)
     if (partial.persistent_memory_enabled !== undefined) syncPatch[KEY_PMEM_ENABLED] = !!partial.persistent_memory_enabled;

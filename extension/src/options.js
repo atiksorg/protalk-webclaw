@@ -44,6 +44,15 @@ const viewportWidthEl = $('agent_viewport_width');
 const viewportHeightEl = $('agent_viewport_height');
 // v8.0 token budget
 const tokenLimitEl = $('token_limit');
+// v11.0 fallback models
+const fallbackModelEls = [
+  { sel: $('fallback_model_0'), custom: $('fallback_model_0_custom') },
+  { sel: $('fallback_model_1'), custom: $('fallback_model_1_custom') },
+  { sel: $('fallback_model_2'), custom: $('fallback_model_2_custom') }
+];
+const switchThresholdEl = $('switch_threshold');
+const recoveryThresholdEl = $('recovery_threshold');
+
 // v10.0 persistent memory
 const pmemEnabledEl = $('persistent_memory_enabled');
 const pmemSrcBaseEl = $('persistent_memory_src_base');
@@ -53,6 +62,7 @@ const exportMemoryCsvBtn = $('export_memory_csv');
 let memorySuffix = '';
 
 const KNOWN = new Set([
+  'google/gemini-3.7-flash',
   'xiaomi/mimo-v2.5',
   'moonshotai/kimi-k2.7-code',
   'google/gemini-3.5-flash',
@@ -69,6 +79,25 @@ function effectiveModel() {
   const custom = isProTalk ? modelProtalkCustomEl : modelCustomEl;
   if (sel.value === '__custom__') return (custom.value || '').trim();
   return sel.value;
+}
+
+/**
+ * Read effective fallback model list from UI selects.
+ * Returns array of non-empty model IDs (up to 3).
+ */
+function effectiveFallbackModels() {
+  const result = [];
+  for (let i = 0; i < fallbackModelEls.length; i++) {
+    const { sel, custom } = fallbackModelEls[i];
+    let val = '';
+    if (sel.value === '__custom__') {
+      val = (custom.value || '').trim();
+    } else if (sel.value) {
+      val = sel.value;
+    }
+    result.push(val);
+  }
+  return result;
 }
 
 function applyModelToUI(model, isProTalk) {
@@ -91,6 +120,14 @@ modelEl.addEventListener('change', () => {
 modelProtalkEl.addEventListener('change', () => {
   modelProtalkCustomEl.style.display = modelProtalkEl.value === '__custom__' ? '' : 'none';
 });
+
+// Fallback model selects: show/hide custom input
+for (let i = 0; i < fallbackModelEls.length; i++) {
+  const { sel, custom } = fallbackModelEls[i];
+  sel.addEventListener('change', () => {
+    custom.style.display = sel.value === '__custom__' ? '' : 'none';
+  });
+}
 
 function toggleProviderFields() {
   const isProTalk = providerEl.value === 'protalk';
@@ -281,6 +318,25 @@ async function load() {
   updateMemorySrcUI();
   // Load ProTalk model
   applyModelToUI(s.model || 'xiaomi/mimo-v2.5', true);
+  // v11.0 fallback models
+  const fb = Array.isArray(s.fallback_models) ? s.fallback_models : [];
+  for (let i = 0; i < fallbackModelEls.length; i++) {
+    const { sel, custom } = fallbackModelEls[i];
+    const fbModel = fb[i] || '';
+    if (fbModel && KNOWN.has(fbModel)) {
+      sel.value = fbModel;
+      custom.style.display = 'none';
+    } else if (fbModel) {
+      sel.value = '__custom__';
+      custom.style.display = '';
+      custom.value = fbModel;
+    } else {
+      sel.value = '';
+      custom.style.display = 'none';
+    }
+  }
+  switchThresholdEl.value = s.switch_threshold ?? 60;
+  recoveryThresholdEl.value = s.recovery_threshold ?? 80;
 }
 
 saveBtn.addEventListener('click', async () => {
@@ -338,6 +394,15 @@ saveBtn.addEventListener('click', async () => {
     persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
     persistent_memory_src_suffix: memorySuffix,
     persistent_memory_src: pmemSrcFinalEl.value.trim()
+  });
+  // v11.0 fallback models — save separately
+  const fbModels = effectiveFallbackModels();
+  const switchThresh = Math.max(10, Math.min(90, parseInt(switchThresholdEl.value, 10) || 60));
+  const recoveryThresh = Math.max(30, Math.min(100, parseInt(recoveryThresholdEl.value, 10) || 80));
+  await setSettings({
+    fallback_models: fbModels,
+    switch_threshold: switchThresh,
+    recovery_threshold: recoveryThresh
   });
   // v8.0 token budget — save separately to ensure it's always set
   const tokenLimit = Math.max(1000, Math.min(50000000, parseInt(tokenLimitEl.value, 10) || 1000000));
@@ -410,6 +475,10 @@ exportBtn.addEventListener('click', async () => {
     spa_dom_stable_ms: parseInt(spaDomStableEl.value, 10) || 300,
     agent_viewport_width: parseInt(viewportWidthEl.value, 10) || 1280,
     agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800,
+    // v11.0 fallback models
+    fallback_models: effectiveFallbackModels(),
+    switch_threshold: Math.max(10, Math.min(90, parseInt(switchThresholdEl.value, 10) || 60)),
+    recovery_threshold: Math.max(30, Math.min(100, parseInt(recoveryThresholdEl.value, 10) || 80)),
     // v10.0 persistent memory
     persistent_memory_enabled: pmemEnabledEl.checked,
     persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
@@ -470,6 +539,26 @@ importFileEl.addEventListener('change', async (e) => {
     if (config.agent_viewport_height != null) viewportHeightEl.value = config.agent_viewport_height;
     // v8.0 token budget
     if (config.token_limit != null) tokenLimitEl.value = config.token_limit;
+    // v11.0 fallback models
+    if (Array.isArray(config.fallback_models)) {
+      for (let i = 0; i < fallbackModelEls.length; i++) {
+        const { sel, custom } = fallbackModelEls[i];
+        const fbModel = config.fallback_models[i] || '';
+        if (fbModel && KNOWN.has(fbModel)) {
+          sel.value = fbModel;
+          custom.style.display = 'none';
+        } else if (fbModel) {
+          sel.value = '__custom__';
+          custom.style.display = '';
+          custom.value = fbModel;
+        } else {
+          sel.value = '';
+          custom.style.display = 'none';
+        }
+      }
+    }
+    if (config.switch_threshold != null) switchThresholdEl.value = config.switch_threshold;
+    if (config.recovery_threshold != null) recoveryThresholdEl.value = config.recovery_threshold;
     // v10.0 persistent memory
     if (config.persistent_memory_enabled !== undefined) pmemEnabledEl.checked = !!config.persistent_memory_enabled;
     if (config.persistent_memory_src_base != null) pmemSrcBaseEl.value = config.persistent_memory_src_base;

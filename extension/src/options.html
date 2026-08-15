@@ -149,7 +149,6 @@
       <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
       <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
       
-      <!--
       <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
       <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
       <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
@@ -161,7 +160,6 @@
       <option value="anymodel/gc/gemini-3.1-flash-lite-preview">anymodel/gc/gemini-3.1-flash-lite-preview</option>
       <option value="anymodel/ag/gemini-3.5-flash-low">anymodel/ag/gemini-3.5-flash-low</option>
       <option value="anymodel/ag/gemini-3.5-flash-extra-low">anymodel/ag/gemini-3.5-flash-extra-low</option>
-      -->
 
       <option value="__custom__">Другая (ввести вручную)...</option>
     </select>
@@ -220,6 +218,73 @@
 
     <label for="step_cap">Лимит шагов по умолчанию</label>
     <input id="step_cap" type="number" min="1" max="2000" value="200" />
+  </div>
+
+  <h2>Резервные модели (умная ротация)</h2>
+  <div class="hint">Если основная модель падает (ошибка, rate limit, timeout), агент автоматически переключается на резервную. Порядок важен: первая резервная — приоритетнее второй.</div>
+
+  <div id="fallback_model_0_row" style="margin-top: 10px;">
+    <label for="fallback_model_0">Резервная модель 1</label>
+    <select id="fallback_model_0">
+      <option value="">— не выбрана —</option>
+      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
+      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
+      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
+      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
+      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
+      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
+      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
+      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
+      <option value="__custom__">Другая (ввести вручную)...</option>
+    </select>
+    <input id="fallback_model_0_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
+  </div>
+
+  <div id="fallback_model_1_row" style="margin-top: 10px;">
+    <label for="fallback_model_1">Резервная модель 2</label>
+    <select id="fallback_model_1">
+      <option value="">— не выбрана —</option>
+      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
+      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
+      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
+      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
+      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
+      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
+      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
+      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
+      <option value="__custom__">Другая (ввести вручную)...</option>
+    </select>
+    <input id="fallback_model_1_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
+  </div>
+
+  <div id="fallback_model_2_row" style="margin-top: 10px;">
+    <label for="fallback_model_2">Резервная модель 3</label>
+    <select id="fallback_model_2">
+      <option value="">— не выбрана —</option>
+      <option value="google/gemini-3.7-flash">google/gemini-3.7-flash</option>
+      <option value="xiaomi/mimo-v2.5">xiaomi/mimo-v2.5</option>
+      <option value="moonshotai/kimi-k2.7-code">moonshotai/kimi-k2.7-code</option>
+      <option value="google/gemini-3.5-flash">google/gemini-3.5-flash</option>
+      <option value="openai/gpt-5.6-luna">openai/gpt-5.6-luna</option>
+      <option value="google/gemini-3.1-flash-lite-preview">google/gemini-3.1-flash-lite-preview</option>
+      <option value="qwen/qwen3.7-flash">qwen/qwen3.7-flash</option>
+      <option value="google/gemini-2.5-pro">google/gemini-2.5-pro</option>
+      <option value="__custom__">Другая (ввести вручную)...</option>
+    </select>
+    <input id="fallback_model_2_custom" style="display:none; margin-top:6px;" placeholder="provider/model-name" />
+  </div>
+
+  <div class="grid2" style="margin-top: 12px;">
+    <div>
+      <label for="switch_threshold">Порог переключения (%)</label>
+      <input id="switch_threshold" type="number" min="10" max="90" step="5" value="60" />
+      <div class="hint">Если рейтинг модели ниже — переключаемся. По умолчанию: 60.</div>
+    </div>
+    <div>
+      <label for="recovery_threshold">Порог возврата (%)</label>
+      <input id="recovery_threshold" type="number" min="30" max="100" step="5" value="80" />
+      <div class="hint">Если приоритетная модель восстановилась до этого — возвращаемся. По умолчанию: 80.</div>
+    </div>
   </div>
 
   <h2>Режимы ввода и обхода защит</h2>
@@ -330,7 +395,10 @@
   "spa_dom_stable_ms": 300,
   "agent_viewport_width": 1280,
   "agent_viewport_height": 800,
-  "token_limit": 1000000
+  "token_limit": 1000000,
+  "fallback_models": ["openai/gpt-5.6-luna", "qwen/qwen3.7-flash", ""],
+  "switch_threshold": 60,
+  "recovery_threshold": 80
 }
 ⚠️ НЕ включайте api_key в Gist!
 Auth Token экспортируется для удобства переноса настроек.</pre>

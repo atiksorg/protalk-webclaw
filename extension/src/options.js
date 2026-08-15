@@ -87,6 +87,7 @@ const pmemSrcBaseEl = $('persistent_memory_src_base');
 const pmemSrcFinalEl = $('persistent_memory_src_final');
 const regenMemorySuffixBtn = $('regen_memory_suffix');
 const exportMemoryCsvBtn = $('export_memory_csv');
+const openMemoryEventsBtn = $('open_memory_events');
 let memorySuffix = '';
 
 // ── Заполняем все <select> моделей из единого источника ──
@@ -259,6 +260,116 @@ function updateMemorySrcUI() {
   pmemSrcFinalEl.disabled = !enabled;
   regenMemorySuffixBtn.disabled = !enabled;
   exportMemoryCsvBtn.disabled = !enabled || !src;
+  openMemoryEventsBtn.disabled = !enabled || !src;
+}
+
+// Полный список настроек, которые должны попадать в backup JSON.
+// Часть из них пока не имеет полей на этой странице, но используется агентом и settings.js.
+const FULL_SETTINGS_KEYS = [
+  'auth_token', 'api_key', 'user_email', 'model', 'provider', 'api_base_url',
+  'temperature', 'reasoning', 'step_cap', 'user_context', 'remote_config_url',
+  'cdp_input_mode', 'spa_network_idle_ms', 'spa_dom_stable_ms',
+  'agent_viewport_width', 'agent_viewport_height',
+  'wait_timeout_default', 'wait_error_detection', 'wait_progress_stall_threshold',
+  'action_delay_ms', 'max_actions_per_session', 'autonomy_mode',
+  'batch_steps_per_item', 'ad_domain_blocklist', 'protalk_upload_token',
+  'token_limit', 'sleep_poll_interval_ms', 'sleep_max_duration_ms',
+  'deep_sleep_poll_interval_ms', 'deep_sleep_max_duration_ms',
+  'fast_track_delay_ms', 'mouse_move_jitter', 'mouse_move_base_delay',
+  'fallback_models', 'switch_threshold', 'recovery_threshold',
+  'persistent_memory_enabled', 'persistent_memory_src_base',
+  'persistent_memory_src_suffix', 'persistent_memory_src'
+];
+
+function applyFallbackModelsToUI(models) {
+  const fb = Array.isArray(models) ? models : [];
+  for (let i = 0; i < fallbackModelEls.length; i++) {
+    const { sel, custom } = fallbackModelEls[i];
+    const fbModel = fb[i] || '';
+    applyModelToSelect(sel, custom, fbModel);
+    if (!fbModel) { sel.value = ''; custom.style.display = 'none'; custom.value = ''; }
+  }
+}
+
+function buildSettingsFromForm(base = {}) {
+  const prov = providerEl.value;
+  const isProTalk = prov === 'protalk';
+  const tokenLimit = Math.max(1000, Math.min(50000000, parseInt(tokenLimitEl.value, 10) || 1000000));
+  const switchThresh = Math.max(10, Math.min(90, parseInt(switchThresholdEl.value, 10) || 60));
+  const recoveryThresh = Math.max(30, Math.min(100, parseInt(recoveryThresholdEl.value, 10) || 80));
+
+  return {
+    ...base,
+    provider: prov,
+    auth_token: isProTalk ? tokenEl.value.trim() : (token2El.value.trim() || base.auth_token || ''),
+    api_key: isProTalk ? (base.api_key || apiKeyEl.value.trim()) : apiKeyEl.value.trim(),
+    user_email: emailEl.value.trim(),
+    model: effectiveModel(),
+    api_base_url: isProTalk ? '' : apiBaseUrlEl.value.trim(),
+    temperature: isProTalk ? 0.3 : (parseFloat(tempEl.value) || 0.2),
+    reasoning: isProTalk ? 'low' : reasonEl.value,
+    step_cap: isProTalk ? 200 : Math.max(1, Math.min(2000, parseInt(stepEl.value, 10) || 200)),
+    user_context: ctxEl.value,
+    remote_config_url: remoteEl.value.trim(),
+    cdp_input_mode: cdpInputEl.checked,
+    spa_network_idle_ms: parseInt(spaNetIdleEl.value, 10) || 500,
+    spa_dom_stable_ms: parseInt(spaDomStableEl.value, 10) || 300,
+    agent_viewport_width: parseInt(viewportWidthEl.value, 10) || 1280,
+    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800,
+    token_limit: tokenLimit,
+    fallback_models: effectiveFallbackModels(),
+    switch_threshold: switchThresh,
+    recovery_threshold: recoveryThresh,
+    persistent_memory_enabled: pmemEnabledEl.checked,
+    persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
+    persistent_memory_src_suffix: memorySuffix,
+    persistent_memory_src: pmemSrcFinalEl.value.trim()
+  };
+}
+
+function pickSupportedSettings(config) {
+  const out = {};
+  for (const key of FULL_SETTINGS_KEYS) {
+    if (config[key] !== undefined) out[key] = config[key];
+  }
+  return out;
+}
+
+function applyConfigToForm(config) {
+  if (config.provider) providerEl.value = config.provider;
+  if (config.user_email != null) emailEl.value = config.user_email;
+  if (config.model) {
+    applyModelToUI(config.model);
+    applyModelToUI(config.model, true);
+  }
+  if (config.auth_token != null) {
+    const isProTalk = (config.provider || providerEl.value) === 'protalk';
+    if (isProTalk) tokenEl.value = config.auth_token;
+    else token2El.value = config.auth_token;
+  }
+  if (config.api_key != null) apiKeyEl.value = config.api_key;
+  if (config.api_base_url != null) apiBaseUrlEl.value = config.api_base_url;
+  if (config.temperature != null) tempEl.value = config.temperature;
+  if (config.reasoning) reasonEl.value = config.reasoning;
+  if (config.step_cap != null) stepEl.value = config.step_cap;
+  if (config.user_context != null) ctxEl.value = config.user_context;
+  if (config.remote_config_url != null) remoteEl.value = config.remote_config_url;
+  if (config.cdp_input_mode !== undefined) cdpInputEl.checked = !!config.cdp_input_mode;
+  if (config.spa_network_idle_ms != null) spaNetIdleEl.value = config.spa_network_idle_ms;
+  if (config.spa_dom_stable_ms != null) spaDomStableEl.value = config.spa_dom_stable_ms;
+  if (config.agent_viewport_width != null) viewportWidthEl.value = config.agent_viewport_width;
+  if (config.agent_viewport_height != null) viewportHeightEl.value = config.agent_viewport_height;
+  if (config.token_limit != null) tokenLimitEl.value = config.token_limit;
+  if (Array.isArray(config.fallback_models)) applyFallbackModelsToUI(config.fallback_models);
+  if (config.switch_threshold != null) switchThresholdEl.value = config.switch_threshold;
+  if (config.recovery_threshold != null) recoveryThresholdEl.value = config.recovery_threshold;
+  if (config.persistent_memory_enabled !== undefined) pmemEnabledEl.checked = !!config.persistent_memory_enabled;
+  if (config.persistent_memory_src_base != null) pmemSrcBaseEl.value = config.persistent_memory_src_base;
+  if (config.persistent_memory_src_suffix != null) memorySuffix = config.persistent_memory_src_suffix;
+  if (pmemEnabledEl.checked && !memorySuffix) memorySuffix = generateMemorySuffix();
+  updateMemorySrcUI();
+  toggleProviderFields();
+  updateProtalkAuthStatus(tokenEl.value && emailEl.value ? emailEl.value : '');
 }
 
 pmemEnabledEl.addEventListener('change', () => {
@@ -269,6 +380,18 @@ pmemSrcBaseEl.addEventListener('input', updateMemorySrcUI);
 regenMemorySuffixBtn.addEventListener('click', () => {
   memorySuffix = generateMemorySuffix();
   updateMemorySrcUI();
+});
+openMemoryEventsBtn.addEventListener('click', () => {
+  updateMemorySrcUI();
+  const src = pmemSrcFinalEl.value.trim();
+  if (!src) { setStatus('Введите SRC памяти', 'err'); return; }
+
+  const url = `https://events.atiks.org/src/${encodeURIComponent(src)}`;
+  if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+    chrome.tabs.create({ url });
+  } else {
+    window.open(url, '_blank', 'noopener');
+  }
 });
 exportMemoryCsvBtn.addEventListener('click', async () => {
   try {
@@ -330,11 +453,7 @@ async function load() {
   applyModelToUI(s.model || 'xiaomi/mimo-v2.5', true);
   // v11.0 fallback models
   const fb = Array.isArray(s.fallback_models) ? s.fallback_models : [];
-  for (let i = 0; i < fallbackModelEls.length; i++) {
-    const { sel, custom } = fallbackModelEls[i];
-    applyModelToSelect(sel, custom, fb[i] || '');
-    if (!fb[i]) { sel.value = ''; custom.style.display = 'none'; }
-  }
+  applyFallbackModelsToUI(fb);
   switchThresholdEl.value = s.switch_threshold ?? 60;
   recoveryThresholdEl.value = s.recovery_threshold ?? 80;
 }
@@ -371,42 +490,7 @@ saveBtn.addEventListener('click', async () => {
     updateMemorySrcUI();
   }
 
-  await setSettings({
-    auth_token: authToken,
-    user_email: emailEl.value.trim(),
-    model: effectiveModel(),
-    provider: prov,
-    api_base_url: isProTalk ? '' : apiBaseUrlEl.value.trim(),
-    api_key: isProTalk ? '' : apiKeyEl.value.trim(),
-    temperature: isProTalk ? 0.3 : (parseFloat(tempEl.value) || 0.2),
-    reasoning: isProTalk ? 'low' : reasonEl.value,
-    step_cap: isProTalk ? 200 : Math.max(1, Math.min(2000, parseInt(stepEl.value, 10) || 200)),
-    user_context: ctxEl.value,
-    remote_config_url: remoteEl.value.trim(),
-    // v3.0
-    cdp_input_mode: cdpInputEl.checked,
-    spa_network_idle_ms: parseInt(spaNetIdleEl.value, 10) || 500,
-    spa_dom_stable_ms: parseInt(spaDomStableEl.value, 10) || 300,
-    agent_viewport_width: parseInt(viewportWidthEl.value, 10) || 1280,
-    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800,
-    // v10.0 persistent memory
-    persistent_memory_enabled: pmemEnabledEl.checked,
-    persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
-    persistent_memory_src_suffix: memorySuffix,
-    persistent_memory_src: pmemSrcFinalEl.value.trim()
-  });
-  // v11.0 fallback models — save separately
-  const fbModels = effectiveFallbackModels();
-  const switchThresh = Math.max(10, Math.min(90, parseInt(switchThresholdEl.value, 10) || 60));
-  const recoveryThresh = Math.max(30, Math.min(100, parseInt(recoveryThresholdEl.value, 10) || 80));
-  await setSettings({
-    fallback_models: fbModels,
-    switch_threshold: switchThresh,
-    recovery_threshold: recoveryThresh
-  });
-  // v8.0 token budget — save separately to ensure it's always set
-  const tokenLimit = Math.max(1000, Math.min(50000000, parseInt(tokenLimitEl.value, 10) || 1000000));
-  await setSettings({ token_limit: tokenLimit });
+  await setSettings(buildSettingsFromForm());
   setStatus('Сохранено ✓', 'ok');
 });
 
@@ -442,6 +526,10 @@ fetchRemoteBtn.addEventListener('click', async () => {
   if (c.agent_viewport_height != null) viewportHeightEl.value = c.agent_viewport_height;
   // v8.0 token budget
   if (c.token_limit != null) tokenLimitEl.value = c.token_limit;
+  // v11.0 fallback models
+  if (Array.isArray(c.fallback_models)) applyFallbackModelsToUI(c.fallback_models);
+  if (c.switch_threshold != null) switchThresholdEl.value = c.switch_threshold;
+  if (c.recovery_threshold != null) recoveryThresholdEl.value = c.recovery_threshold;
   // v10.0 persistent memory
   if (c.persistent_memory_enabled !== undefined) pmemEnabledEl.checked = !!c.persistent_memory_enabled;
   if (c.persistent_memory_src_base != null) pmemSrcBaseEl.value = c.persistent_memory_src_base;
@@ -454,52 +542,26 @@ fetchRemoteBtn.addEventListener('click', async () => {
 // ── Export config to JSON file ──
 exportBtn.addEventListener('click', async () => {
   const prov = providerEl.value;
-  const isProTalk = prov === 'protalk';
-
+  const saved = await getSettings();
   const config = {
     _exported_at: new Date().toISOString(),
-    _note: 'Auth Token экспортируется для удобства переноса. api_key НЕ экспортируется.',
-    provider: prov,
-    auth_token: isProTalk ? tokenEl.value.trim() : token2El.value.trim(),
-    user_email: emailEl.value.trim(),
-    model: effectiveModel(),
-    api_base_url: isProTalk ? '' : apiBaseUrlEl.value.trim(),
-    temperature: isProTalk ? 0.3 : (parseFloat(tempEl.value) || 0.2),
-    reasoning: isProTalk ? 'low' : reasonEl.value,
-    step_cap: isProTalk ? 200 : Math.max(1, Math.min(2000, parseInt(stepEl.value, 10) || 200)),
-    user_context: ctxEl.value,
-    remote_config_url: remoteEl.value.trim(),
-    // v3.0
-    cdp_input_mode: cdpInputEl.checked,
-    spa_network_idle_ms: parseInt(spaNetIdleEl.value, 10) || 500,
-    spa_dom_stable_ms: parseInt(spaDomStableEl.value, 10) || 300,
-    agent_viewport_width: parseInt(viewportWidthEl.value, 10) || 1280,
-    agent_viewport_height: parseInt(viewportHeightEl.value, 10) || 800,
-    // v11.0 fallback models
-    fallback_models: effectiveFallbackModels(),
-    switch_threshold: Math.max(10, Math.min(90, parseInt(switchThresholdEl.value, 10) || 60)),
-    recovery_threshold: Math.max(30, Math.min(100, parseInt(recoveryThresholdEl.value, 10) || 80)),
-    // v10.0 persistent memory
-    persistent_memory_enabled: pmemEnabledEl.checked,
-    persistent_memory_src_base: sanitizeSrcBase(pmemSrcBaseEl.value || ''),
-    persistent_memory_src_suffix: memorySuffix,
-    persistent_memory_src: pmemSrcFinalEl.value.trim()
+    _schema: 'webclaw-settings-backup-v1',
+    _note: 'Полный backup настроек WebClaw. Включает auth_token и api_key для переноса между установками. Не публикуйте этот файл.',
+    ...pickSupportedSettings(saved),
+    ...buildSettingsFromForm(pickSupportedSettings(saved))
   };
-
-  // v8.0 token budget
-  config.token_limit = Math.max(1000, Math.min(50000000, parseInt(tokenLimitEl.value, 10) || 1000000));
 
   const json = JSON.stringify(config, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `webclaw-config-${prov}-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `webclaw-settings-backup-${prov}-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  setStatus('Конфиг экспортирован ✓', 'ok');
+  setStatus('Полный backup настроек экспортирован ✓', 'ok');
 });
 
 // ── Import config from JSON file ──
@@ -513,52 +575,10 @@ importFileEl.addEventListener('change', async (e) => {
   try {
     const text = await file.text();
     const config = JSON.parse(text);
-    // Apply to form
-    if (config.provider) providerEl.value = config.provider;
-    if (config.user_email != null) emailEl.value = config.user_email;
-    if (config.model) {
-      applyModelToUI(config.model);
-      applyModelToUI(config.model, true);
-    }
-    if (config.auth_token != null) {
-      const isProTalk = config.provider === 'protalk';
-      if (isProTalk) tokenEl.value = config.auth_token;
-      else token2El.value = config.auth_token;
-    }
-    if (config.api_base_url != null) apiBaseUrlEl.value = config.api_base_url;
-    if (config.temperature != null) tempEl.value = config.temperature;
-    if (config.reasoning) reasonEl.value = config.reasoning;
-    if (config.step_cap != null) stepEl.value = config.step_cap;
-    if (config.user_context != null) ctxEl.value = config.user_context;
-    if (config.remote_config_url != null) remoteEl.value = config.remote_config_url;
-    // v3.0
-    if (config.cdp_input_mode !== undefined) cdpInputEl.checked = !!config.cdp_input_mode;
-    if (config.spa_network_idle_ms != null) spaNetIdleEl.value = config.spa_network_idle_ms;
-    if (config.spa_dom_stable_ms != null) spaDomStableEl.value = config.spa_dom_stable_ms;
-    if (config.agent_viewport_width != null) viewportWidthEl.value = config.agent_viewport_width;
-    if (config.agent_viewport_height != null) viewportHeightEl.value = config.agent_viewport_height;
-    // v8.0 token budget
-    if (config.token_limit != null) tokenLimitEl.value = config.token_limit;
-    // v11.0 fallback models
-    if (Array.isArray(config.fallback_models)) {
-      for (let i = 0; i < fallbackModelEls.length; i++) {
-        const { sel, custom } = fallbackModelEls[i];
-        const fbModel = config.fallback_models[i] || '';
-        applyModelToSelect(sel, custom, fbModel);
-        if (!fbModel) { sel.value = ''; custom.style.display = 'none'; }
-      }
-    }
-    if (config.switch_threshold != null) switchThresholdEl.value = config.switch_threshold;
-    if (config.recovery_threshold != null) recoveryThresholdEl.value = config.recovery_threshold;
-    // v10.0 persistent memory
-    if (config.persistent_memory_enabled !== undefined) pmemEnabledEl.checked = !!config.persistent_memory_enabled;
-    if (config.persistent_memory_src_base != null) pmemSrcBaseEl.value = config.persistent_memory_src_base;
-    if (config.persistent_memory_src_suffix != null) memorySuffix = config.persistent_memory_src_suffix;
-    if (pmemEnabledEl.checked && !memorySuffix) memorySuffix = generateMemorySuffix();
-    updateMemorySrcUI();
-    // Update provider-specific field visibility
-    toggleProviderFields();
-    setStatus('Конфиг загружен из файла. Не забудь нажать «Сохранить».', 'ok');
+    const supported = pickSupportedSettings(config);
+    applyConfigToForm(supported);
+    await setSettings(supported);
+    setStatus('Полный backup настроек импортирован и сохранён ✓', 'ok');
   } catch (err) {
     setStatus('Ошибка чтения файла: ' + err.message, 'err');
   }

@@ -184,10 +184,11 @@ function readSync() {
 /** Read secrets from chrome.storage.local (device-local, never synced). */
 function readLocalSecrets() {
   return new Promise((resolve) => {
-    chrome.storage.local.get([KEY_TOKEN, KEY_API_KEY], (items) => {
+    chrome.storage.local.get([KEY_TOKEN, KEY_API_KEY, KEY_UPLOAD_TOKEN], (items) => {
       resolve({
         auth_token: items[KEY_TOKEN] || '',
-        api_key: items[KEY_API_KEY] || ''
+        api_key: items[KEY_API_KEY] || '',
+        protalk_upload_token: items[KEY_UPLOAD_TOKEN] || ''
       });
     });
   });
@@ -295,7 +296,11 @@ export function setSettings(partial) {
     if (partial.mouse_move_base_delay !== undefined) syncPatch[KEY_MOUSE_MOVE_BASE_DELAY] = Math.max(0, Math.min(50, partial.mouse_move_base_delay));
 
     // v11.0 Model Rotation (fallback models)
-    if (partial.fallback_models !== undefined) syncPatch[KEY_FALLBACK_MODELS] = Array.isArray(partial.fallback_models) ? partial.fallback_models.filter(Boolean).slice(0, 3) : [];
+    if (partial.fallback_models !== undefined) {
+      syncPatch[KEY_FALLBACK_MODELS] = Array.isArray(partial.fallback_models)
+        ? partial.fallback_models.map(v => String(v || '').trim()).slice(0, 3)
+        : [];
+    }
     if (partial.switch_threshold !== undefined) syncPatch[KEY_SWITCH_THRESHOLD] = Math.max(10, Math.min(90, partial.switch_threshold));
     if (partial.recovery_threshold !== undefined) syncPatch[KEY_RECOVERY_THRESHOLD] = Math.max(30, Math.min(100, partial.recovery_threshold));
 
@@ -324,7 +329,7 @@ export function setSettings(partial) {
 export function clearSettings() {
   return new Promise((resolve) => {
     chrome.storage.sync.clear(() => {
-      chrome.storage.local.remove([KEY_TOKEN, KEY_API_KEY, 'settings_cache'], () => resolve({ ok: true }));
+      chrome.storage.local.remove([KEY_TOKEN, KEY_API_KEY, KEY_UPLOAD_TOKEN, 'settings_cache'], () => resolve({ ok: true }));
     });
   });
 }

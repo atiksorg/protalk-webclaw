@@ -47,7 +47,6 @@ const modelProtalkCustomEl = $('model_protalk_custom');
 const tempEl = $('temperature');
 const reasonEl = $('reasoning');
 const stepEl = $('step_cap');
-const ctxEl = $('user_context');
 const remoteEl = $('remote_config_url');
 const fetchRemoteBtn = $('fetch_remote');
 const showGistBtn = $('show_gist_format');
@@ -309,7 +308,6 @@ function buildSettingsFromForm(base = {}) {
     temperature: isProTalk ? 0.3 : (parseFloat(tempEl.value) || 0.2),
     reasoning: isProTalk ? 'low' : reasonEl.value,
     step_cap: isProTalk ? 200 : Math.max(1, Math.min(2000, parseInt(stepEl.value, 10) || 200)),
-    user_context: ctxEl.value,
     remote_config_url: remoteEl.value.trim(),
     cdp_input_mode: cdpInputEl.checked,
     spa_network_idle_ms: parseInt(spaNetIdleEl.value, 10) || 500,
@@ -352,7 +350,6 @@ function applyConfigToForm(config) {
   if (config.temperature != null) tempEl.value = config.temperature;
   if (config.reasoning) reasonEl.value = config.reasoning;
   if (config.step_cap != null) stepEl.value = config.step_cap;
-  if (config.user_context != null) ctxEl.value = config.user_context;
   if (config.remote_config_url != null) remoteEl.value = config.remote_config_url;
   if (config.cdp_input_mode !== undefined) cdpInputEl.checked = !!config.cdp_input_mode;
   if (config.spa_network_idle_ms != null) spaNetIdleEl.value = config.spa_network_idle_ms;
@@ -431,7 +428,6 @@ async function load() {
   tempEl.value = s.temperature ?? 0.2;
   reasonEl.value = s.reasoning || 'low';
   stepEl.value = s.step_cap || 200;
-  ctxEl.value = s.user_context || '';
   remoteEl.value = s.remote_config_url || '';
   // v3.0
   cdpInputEl.checked = s.cdp_input_mode !== false;
@@ -517,7 +513,6 @@ fetchRemoteBtn.addEventListener('click', async () => {
   if (c.temperature != null) tempEl.value = c.temperature;
   if (c.reasoning) reasonEl.value = c.reasoning;
   if (c.step_cap != null) stepEl.value = c.step_cap;
-  if (!ctxEl.value.trim() && c.user_context) ctxEl.value = c.user_context;
   // v3.0
   if (c.cdp_input_mode !== undefined) cdpInputEl.checked = !!c.cdp_input_mode;
   if (c.spa_network_idle_ms != null) spaNetIdleEl.value = c.spa_network_idle_ms;

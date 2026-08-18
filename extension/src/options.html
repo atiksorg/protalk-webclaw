@@ -274,11 +274,6 @@
     </div>
   </div>
 
-  <h2>Контекст пользователя</h2>
-  <label for="user_context">Резюме / контакты / шаблоны сопроводительных</label>
-  <textarea id="user_context" placeholder="Иван Петров, Frontend, 5 лет. Telegram @ivan_p. Сопроводительное: кратко, по делу, упоминать стек..."></textarea>
-  <div class="hint">Этот текст автоматически подмешивается в system-prompt при каждом вызове модели.</div>
-
   <h2>Постоянная память</h2>
   <div class="check-row">
     <input type="checkbox" id="persistent_memory_enabled" />
@@ -322,7 +317,7 @@
   <input id="remote_config_url" type="url" placeholder="https://gist.githubusercontent.com/&lt;user&gt;/&lt;gist&gt;/raw/protalk-claw.json" />
   <div class="hint">
     Создай публичный <b>Gist</b> с файлом (например, <code>protalk-claw.json</code>) и вставь сюда raw-URL. Содержимое Gist переживает удаление и переустановку расширения.
-    Пример JSON: <code>{"user_email":"...","model":"openai/gpt-4o","user_context":"..."}</code>.
+    Пример JSON: <code>{"user_email":"...","model":"openai/gpt-4o"}</code>.
     Локальные поля имеют приоритет: если поле уже заполнено в форме, оно не перезаписывается.
     <b>⚠️ Никогда не включайте api_key в Gist!</b> Секреты хранятся только локально.
   </div>
@@ -338,7 +333,6 @@
   "temperature": 0.2,
   "reasoning": "low",
   "step_cap": 200,
-  "user_context": "Имя, контакты, что писать в сопроводительном...",
   "cdp_input_mode": false,
   "spa_network_idle_ms": 500,
   "spa_dom_stable_ms": 300,

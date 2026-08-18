@@ -479,7 +479,8 @@ export async function runVisionLoop({ task, context, options, memory, sessionLog
           prompt: userMessage.slice(0, 3000),
           modelResponse: modelText.slice(0, 3000),
           parsedAction: action,
-          observation
+          observation,
+          modelId: rotation.getActiveModelId()
         });
       }
 

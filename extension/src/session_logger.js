@@ -68,7 +68,8 @@ export class SessionLogger {
       modelResponse: stepData.modelResponse || '',
       parsedAction: stepData.parsedAction || null,
       observation: stepData.observation || null,
-      error: stepData.error || null
+      error: stepData.error || null,
+      modelId: stepData.modelId || ''
     };
     this.steps.push(step);
 
@@ -383,6 +384,8 @@ export class SessionLogger {
       </div>
     </div>
 
+    ${this._generateModelsUsedHtml()}
+
     <!-- Task Context -->
     ${this.context ? `
     <div class="section">
@@ -478,6 +481,35 @@ export class SessionLogger {
     return html;
   }
 
+  _generateModelsUsedHtml() {
+    // Count steps per model
+    const modelCounts = {};
+    for (const step of this.steps) {
+      if (step.modelId) {
+        const name = this._shortModelName(step.modelId);
+        modelCounts[name] = (modelCounts[name] || 0) + 1;
+      }
+    }
+    const entries = Object.entries(modelCounts);
+    if (entries.length === 0) return '';
+
+    // Sort by count descending
+    entries.sort((a, b) => b[1] - a[1]);
+
+    const items = entries.map(([name, count]) =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:#1e293b;border:1px solid #0c4a6e;border-radius:12px;font-size:11px;">
+        <span style="color:#7dd3fc;font-weight:600;">🤖 ${this._esc(name)}</span>
+        <span style="color:#9aa3af;">${count} steps</span>
+      </span>`
+    ).join(' ');
+
+    return `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;margin-bottom:6px;">Models Used</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${items}</div>
+    </div>`;
+  }
+
   _generateStepsHtml() {
     if (this.steps.length === 0) return '<p style="color: var(--muted);">No steps recorded.</p>';
 
@@ -496,6 +528,7 @@ export class SessionLogger {
             <span class="action-badge ${actionClass}">${this._esc(actionType)}</span>
             ${step.parsedAction?.reason ? ` — ${this._esc(step.parsedAction.reason.slice(0, 100))}` : ''}
           </span>
+          ${step.modelId ? `<span style="display:inline-flex;align-items:center;gap:2px;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;background:#1e293b;color:#7dd3fc;border:1px solid #0c4a6e;">🤖 ${this._esc(this._shortModelName(step.modelId))}</span>` : ''}
           <span class="step-time">${time}</span>
         </div>
         <div class="step-body">
@@ -691,6 +724,12 @@ export class SessionLogger {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  _shortModelName(modelId) {
+    if (!modelId) return '';
+    const parts = modelId.split('/');
+    return parts.length > 1 ? parts.slice(1).join('/') : modelId;
   }
 
   _formatDuration(seconds) {

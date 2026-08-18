@@ -3,21 +3,21 @@ import { formatActionHuman, formatObservationHuman, formatThought } from './form
 
 const $ = (id) => document.getElementById(id);
 const taskEl = $('task');
-const contextEl = $('context');
 const urlEl = $('url');
 const stepcapEl = $('stepcap');
 const dryEl = $('dry');
 const startBtn = $('start');
 const stopBtn = $('stop');
 const pauseBtn = $('pause');
-const exportHtmlBtn = $('export-html');
-const exportApiBtn = $('export-api');
 const optionsBtn = $('options');
 const logsBtn = $('logs');
 const clearLogBtn = $('clear-log');
 const monitorBtn = $('monitor');
 const sidebarBtn = $('sidebar');
 const toggleWidgetBtn = $('toggle-widget');
+const applyPromptBtn = $('apply-prompt');
+const applyRow = $('apply-row');
+const startRow = $('start-row');
 const dot = $('dot');
 const meta = $('meta');
 const log = $('log');
@@ -67,7 +67,33 @@ function refresh() {
   const phaseText = currentPhase !== 'idle' ? ` · ${currentPhase}` : '';
   const tokensText = totalTokens > 0 ? ` · 🪙 ${totalTokens.toLocaleString()} tok` : '';
   meta.textContent = `Шагов: ${stepCount} · Модель: ${modelName} · ${src} · ${running ? (paused ? 'пауза' : 'работает') : 'ожидание'}${phaseText}${tokensText}`;
+  updateApplyVisibility();
 }
+
+// --- Live Prompt Editing ---
+function updateApplyVisibility() {
+  if (running) {
+    startRow.style.display = 'none';
+    // Show apply row only if task field has changed from its original value
+    const origTask = taskEl.dataset.original ?? undefined;
+    const dirty = origTask !== undefined && taskEl.value.trim() !== origTask;
+    applyRow.style.display = dirty ? '' : 'none';
+    taskEl.classList.toggle('field-dirty', origTask !== undefined && taskEl.value.trim() !== origTask);
+  } else {
+    startRow.style.display = '';
+    applyRow.style.display = 'none';
+    taskEl.classList.remove('field-dirty');
+    delete taskEl.dataset.original;
+  }
+}
+
+function markFieldsOriginal(task) {
+  taskEl.dataset.original = task || '';
+  taskEl.classList.remove('field-dirty');
+}
+
+// Track field changes for live editing
+taskEl.addEventListener('input', updateApplyVisibility);
 
 // Phase indicator management
 function updatePhaseIndicator(phase) {
@@ -97,10 +123,9 @@ async function loadSettings() {
   modelName = v.model || 'xiaomi/mimo-v2.5';
   stepcapEl.value = Number.isFinite(Number(v.step_cap)) ? Number(v.step_cap) : 200;
   configSource = v.remote_config_url ? 'remote' : 'local';
-  // Restore last task/context for convenience
-  const last = await chrome.storage.local.get({ last_task: '', last_context: '', last_url: '' });
+  // Restore last task for convenience
+  const last = await chrome.storage.local.get({ last_task: '', last_url: '' });
   taskEl.value = last.last_task || '';
-  contextEl.value = last.last_context || '';
 
   // Auto-fill URL from the current active tab if the field is empty
   if (!last.last_url) {
@@ -137,6 +162,8 @@ async function syncWithBackground() {
         updatePhaseIndicator(st.phase);
       }
       refresh();
+      // Mark fields as original so dirty detection works after popup reopen
+      markFieldsOriginal(st.task || '');
     }
 
     // Replay buffered logs
@@ -222,6 +249,11 @@ function replayBufferedEvent(msg) {
       appendLog(msg.ok ? ('✔ ' + (msg.answer || 'Готово')) : ('✖ ' + (msg.reason || 'Остановлено')),
                  msg.ok ? 'ok' : 'err');
       break;
+    case 'task_updated':
+      appendLog(`✏️ Промпт обновлён на шаге ${msg.step}`);
+      if (msg.task) taskEl.dataset.original = msg.task;
+      updateApplyVisibility();
+      break;
   }
 }
 
@@ -231,9 +263,7 @@ function initPresets() {
   presetBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const task = btn.dataset.task;
-      const context = btn.dataset.context || '';
       taskEl.value = task;
-      contextEl.value = context;
       
       // Visual feedback
       btn.style.background = '#16a34a';
@@ -248,38 +278,15 @@ function initPresets() {
   });
 }
 
-// Export HTML report with persistent screenshot URLs
-exportHtmlBtn.addEventListener('click', async () => {
-  appendLog('⏳ Генерация HTML-отчёта...');
-  const r = await chrome.runtime.sendMessage({ kind: 'export_html_report' });
-  if (r?.ok) {
-    appendLog('📥 HTML-отчёт скачан', 'ok');
-  } else {
-    appendLog('Ошибка экспорта: ' + (r?.error || 'нет данных сессии'), 'err');
-  }
-});
-
-// Export raw API log (CURL + responses)
-exportApiBtn.addEventListener('click', async () => {
-  appendLog('⏳ Генерация API-лога...');
-  const r = await chrome.runtime.sendMessage({ kind: 'export_api_log' });
-  if (r?.ok) {
-    appendLog('📡 API-лог скачан', 'ok');
-  } else {
-    appendLog('Ошибка экспорта: ' + (r?.error || 'нет данных сессии'), 'err');
-  }
-});
-
 startBtn.addEventListener('click', async () => {
   const task = taskEl.value.trim();
   if (!task) { appendLog('Введите задачу', 'err'); return; }
   const stepCap = Math.max(1, Math.min(2000, parseInt(stepcapEl.value, 10) || 200));
-  const context = contextEl.value.trim();
   const initialUrl = urlEl.value.trim() || null;
   const dryRun = !!dryEl.checked;
 
   await chrome.storage.local.set({
-    last_task: task, last_context: context, last_url: initialUrl || ''
+    last_task: task, last_url: initialUrl || ''
   });
   await chrome.storage.sync.set({ step_cap: stepCap });
 
@@ -296,7 +303,7 @@ startBtn.addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({
     kind: 'start',
     task,
-    context,
+    context: '',
     initialUrl,
     options: { stepCap, dryRun }
   });
@@ -308,6 +315,50 @@ startBtn.addEventListener('click', async () => {
     if (err === 'missing_settings') {
       appendLog('Откройте Настройки и заполните токен / email / модель', 'err');
     }
+  } else {
+    markFieldsOriginal(task);
+  }
+});
+
+// --- Apply prompt changes while agent is running ---
+applyPromptBtn.addEventListener('click', async () => {
+  const newTask = taskEl.value.trim();
+  if (!newTask) { appendLog('Задача не может быть пустой', 'err'); return; }
+
+  applyPromptBtn.textContent = '✏️ Отправка...';
+  applyPromptBtn.disabled = true;
+
+  try {
+    const r = await chrome.runtime.sendMessage({
+      kind: 'update_prompt',
+      task: newTask,
+      context: ''
+    });
+    if (r?.ok && r.changed) {
+      appendLog('✏️ Промпт обновлён — применится на следующем шаге', 'ok');
+      applyPromptBtn.textContent = '✅ Применено';
+      applyPromptBtn.classList.add('sent');
+      markFieldsOriginal(newTask);
+      setTimeout(() => {
+        applyPromptBtn.textContent = '✏️ Применить изменения';
+        applyPromptBtn.classList.remove('sent');
+        applyPromptBtn.disabled = false;
+        updateApplyVisibility();
+      }, 1500);
+    } else if (r?.ok && !r.changed) {
+      appendLog('✏️ Нет изменений');
+      applyPromptBtn.textContent = '✏️ Применить изменения';
+      applyPromptBtn.disabled = false;
+      updateApplyVisibility();
+    } else {
+      appendLog('Ошибка: ' + (r?.error || 'unknown'), 'err');
+      applyPromptBtn.textContent = '✏️ Применить изменения';
+      applyPromptBtn.disabled = false;
+    }
+  } catch (e) {
+    appendLog('Ошибка отправки: ' + e.message, 'err');
+    applyPromptBtn.textContent = '✏️ Применить изменения';
+    applyPromptBtn.disabled = false;
   }
 });
 
@@ -514,6 +565,12 @@ chrome.runtime.onMessage.addListener((msg) => {
       refresh();
       appendLog(msg.ok ? ('✔ ' + (msg.answer || 'Готово')) : ('✖ ' + (msg.reason || 'Остановлено')),
                  msg.ok ? 'ok' : 'err');
+      break;
+    case 'task_updated':
+      appendLog(`✏️ Промпт обновлён на шаге ${msg.step}`);
+      // Update original values so dirty detection stays accurate
+      if (msg.task) taskEl.dataset.original = msg.task;
+      updateApplyVisibility();
       break;
   }
 });

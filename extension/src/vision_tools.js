@@ -1787,7 +1787,7 @@ async function toolWatchfulSleep(durationSec, reason) {
     elapsedSec,
     pollCount
   });
-  broadcast({ kind: 'log', text: `👁️ Watchful sleep ended: ${wakeReason} after ${elapsedSec}s` });
+  broadcast({ kind: 'log', text: `��️ Watchful sleep ended: ${wakeReason} after ${elapsedSec}s` });
 
   return {
     ok: true,

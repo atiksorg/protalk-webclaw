@@ -249,7 +249,7 @@ async function attemptResume() {
     const elapsedSec = Math.round(elapsed / 1000);
     const wakeEntry = {
       action: `[СИСТЕМА] Пробуждение из глубокой гибернации`,
-      observation: `Прошло ~${elapsedSec} секунд (${Math.round(elapsedSec / 60)} мин). Причина сна: ${sleepResult.reason || '?'}. Запрошено было: ${sleepResult.requestedDurationSec || '?'}сек. Текущее состояние страницы — на скриншоте.`
+      observation: `Прошло ~${elapsedSec} секунд (${Math.round(elapsedSec / 60)} мин). Причина сна: ${sleepResult.reason || '?'}. Запрошено было: ${sleepResult.requestedDurationSec || '?'}сек. Текущее состояние стра��ицы — на скриншоте.`
     };
     runtime.history.push(wakeEntry);
     if (runtime.history.length > MAX_HISTORY) {
@@ -415,6 +415,58 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           await saveState(runtime, runtime._memory);
           sendResponse({ ok: true });
           break;
+        case 'update_prompt': {
+          if (!runtime.running) {
+            sendResponse({ ok: false, error: 'not_running' });
+            break;
+          }
+          const newTask = msg.task;
+          const newContext = msg.context;
+          const hasTask = typeof newTask === 'string' && newTask.trim();
+          const hasCtx = typeof newContext === 'string';
+          if (!hasTask && !hasCtx) {
+            sendResponse({ ok: false, error: 'nothing_to_update' });
+            break;
+          }
+
+          const changes = [];
+          if (hasTask && newTask.trim() !== runtime.task) {
+            runtime.task = newTask.trim();
+            changes.push('задача');
+          }
+          if (hasCtx && newContext !== runtime.context) {
+            runtime.context = newContext;
+            if (runtime._memory) {
+              runtime._memory.setUserContext(newContext);
+            }
+            changes.push('контекст');
+          }
+
+          if (changes.length === 0) {
+            sendResponse({ ok: true, changed: false });
+            break;
+          }
+
+          // Inject notification into history so the model sees the change
+          runtime.history.push({
+            action: '[СИСТЕМА] Обновление промпта пользователем',
+            observation: `Пользователь обновил: ${changes.join(', ')}. Новое задание/контекст вступает в силу на следующем шаге. Продолжайте работу с учётом изменений.`
+          });
+          if (runtime.history.length > MAX_HISTORY) {
+            runtime.history.splice(0, runtime.history.length - MAX_HISTORY);
+          }
+
+          await saveState(runtime, runtime._memory);
+          broadcast({
+            kind: 'task_updated',
+            task: runtime.task,
+            context: runtime.context,
+            step: runtime.step
+          });
+          broadcast({ kind: 'log', text: `✏️ Промпт обновлён: ${changes.join(', ')} (применится на шаге ${runtime.step + 1})` });
+          sendResponse({ ok: true, changed: true, updated: changes });
+          break;
+        }
         case 'get_memory':
           if (runtime._memory) {
             sendResponse({ ok: true, memory: runtime._memory.toStatusPayload() });
@@ -443,6 +495,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               paused: runtime.pauseFlag,
               step: runtime.step,
               task: runtime.task,
+              context: runtime.context,
               phase: runtime._memory?.phase || 'idle',
               totalTokensUsed: runtime.totalTokensUsed
             },

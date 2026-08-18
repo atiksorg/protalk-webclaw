@@ -172,16 +172,6 @@
     }
     .preset-btn .badge.popular { background: #16a34a; }
 
-    /* Export button */
-    .export-btn {
-      background: linear-gradient(135deg, #10b981, #059669);
-      color: white;
-      font-weight: 500;
-    }
-    .export-btn:hover {
-      background: linear-gradient(135deg, #059669, #047857);
-    }
-
     /* Phase indicator */
     .phase-indicator {
       margin: 8px 0;
@@ -213,43 +203,54 @@
       50% { opacity: 0.5; }
     }
 
+    /* Live prompt editing */
+    .field-dirty {
+      border-color: #f59e0b !important;
+      box-shadow: 0 0 0 1px #f59e0b44;
+    }
+    #apply-prompt {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      animation: fadeIn 0.2s ease;
+    }
+    #apply-prompt:hover { background: linear-gradient(135deg, #d97706, #b45309); }
+    #apply-prompt.sent {
+      background: #16a34a;
+      pointer-events: none;
+    }
+
   </style>
 </head>
 <body>
   <h1><span class="logo">🦞</span> <span class="dot" id="dot"></span> WebClaw by ProTalk</h1>
 
-  <!-- Quick Preset Tasks (collapsible) -->
+  <!-- Example Tasks (collapsible) -->
   <details class="presets">
-    <summary class="presets-title">⚡ Быстрые действия</summary>
+    <summary class="presets-title">📋 Примеры задач</summary>
     <div class="presets-grid">
-      <button class="preset-btn" data-task="Apply to all suitable jobs on this page" data-context="Search for jobs matching my experience. Auto-fill applications with my resume details. Skip jobs requiring login if not logged in.">
-        <span class="icon">💼</span> Авто-отклик на вакансии
+      <button class="preset-btn" data-task="Запоминай все ID анкет, на которые ты откликаешься. Перед тем, как откликнуться на новую анкету, сначала проверь по своей долгосрочной памяти, не было ли уже отклика на эту анкету. Если был — пропусти её и иди дальше. Изучи полностью моё резюме на странице. Затем откликнись на 1000 подходящих мне вакансий. Если при отклике просят сопроводительный текст — обязательно добавляй в конце: "Если вам интересна моя кандидатура, пишите мне в Телеграм @MY_NAME". Работай, пока не выполнишь план или не закончатся токены. Работай с долгосрочной памятью через функции Remember и Recall.">
+        <span class="icon">💼</span> Массовый отклик на вакансии с памятью
         <span class="badge popular">хит</span>
       </button>
-      <button class="preset-btn" data-task="Extract all email addresses from this page and save them" data-context="Find all email addresses visible on the page. Format as a clean list.">
-        <span class="icon">📧</span> Извлечь email
+      <button class="preset-btn" data-task="Прочитай моё резюме на странице. Найди на этой странице все подходящие мне вакансии и откликнись на каждую. Запоминай ID уже обработанных анкет через Remember, чтобы не откликаться повторно. Для каждого отклика добавляй сопроводительное письмо, адаптированное под конкретную вакансию. Работай без остановки, пока не обработаешь все подходящие вакансии на странице.">
+        <span class="icon">🎯</span> Умный отклик с адаптацией под вакансию
       </button>
-      <button class="preset-btn" data-task="Add all items to cart on this shopping page" data-context="Click 'Add to cart' for each product. Skip out-of-stock items.">
-        <span class="icon">🛒</span> Всё в корзину
+      <button class="preset-btn" data-task="Открой интерфейс Яндекс.Директ. Перейди в раздел «Кампании». Собери семантическое ядро: найди все ключевые фразы с высоким CTR и конверсией. Сохрани их в долгосрочную память через Remember. Для каждой группы объявлений создай новые варианты текстов на основе успешных шаблонов. Затем найди минус-слова, которые дают мало конверсий, и добавь их в кампании. Работай по всем активным кампаниям.">
+        <span class="icon">📊</span> Яндекс.Директ: сбор семантики и оптимизация
       </button>
-      <button class="preset-btn" data-task="Fill out this form with my information" data-context="Use my name, email, phone and other details from the context to fill all form fields.">
-        <span class="icon">📝</span> Заполнить форму
+      <button class="preset-btn" data-task="Открой Яндекс.Директ. Перейди в управление ставками. Проанализируй эффективность каждой кампании за последний месяц. Увеличь ставки на кампании с высоким ROI и снизь на неэффективные. Для кампаний с CTR ниже 3% снизь ставки на 20%. Сохрани все изменения в долгосрочную память через Remember. Повторяй цикл анализа и корректировки каждые 2 часа.">
+        <span class="icon">📈</span> Яндекс.Директ: автоматическое управление ставками
       </button>
-      <button class="preset-btn" data-task="Take a screenshot of each section and summarize the page content" data-context="Scroll through the entire page, capturing key sections. Provide a structured summary.">
-        <span class="icon">📸</span> Скриншот и сводка
+      <button class="preset-btn" data-task="Открой интерфейс видеокамер. Проверь статус всех камер. Если камера не работает или показывает артефакты — запомни через Remember и уведомь меня. Проверяй камеры каждые 5 минут. Если на камере обнаружено движение в нерабочее время — запомни и уведомь. Сохраняй скриншоты каждого инцидента. Работай в режиме мониторинга 24/7.">
+        <span class="icon">📹</span> Мониторинг видеокамер 24/7
       </button>
-      <button class="preset-btn" data-task="Monitor this page for changes and notify me when something updates" data-context="Check every 30 seconds for new content, price changes, or availability updates.">
-        <span class="icon">👁️</span> Мониторинг изменений
-        <span class="badge">новое</span>
+      <button class="preset-btn" data-task="Открой маркетплейс. Собери цены конкурентов на товары из моей категории. Для каждого товара запомни через Remember: название, цену, рейтинг, количество отзывов. Затем проанализируй и создай отчёт: какие товары дешевле моих, какие дороже. Предложи оптимальные цены для моих товаров. Повторяй мониторинг раз в день.">
+        <span class="icon">🏷️</span> Парсинг цен конкурентов на маркетплейсе
       </button>
     </div>
   </details>
 
   <label for="task">Задача</label>
-  <textarea id="task" placeholder="Например: откликнуться на все вакансии, извлечь цены, заполнить форму..."></textarea>
-
-  <label for="context">Контекст (любые знания, которые важны для выполнения задачи)</label>
-  <textarea id="context" class="small" placeholder="Ваше имя, email, опыт, что писать в формах на сайтах..."></textarea>
+  <textarea id="task" placeholder="Например: откликнуться на все вакансии, извлечь цены, заполнить форму..." style="min-height:140px;"></textarea>
 
   <div class="row">
     <div style="flex:2">
@@ -264,14 +265,13 @@
 
   <label class="check"><input type="checkbox" id="dry" /> Тестовый режим (показать действия без выполнения)</label>
 
-  <div class="row">
+  <div class="row" id="start-row">
     <button id="start" class="primary">▶ Старт</button>
     <button id="pause" class="warn" disabled>⏸ Пауза</button>
     <button id="stop" class="danger" disabled>■ Стоп</button>
   </div>
-  <div class="row">
-    <button id="export-html" class="export-btn">📥 HTML-отчёт</button>
-    <button id="export-api" class="ghost">📡 API-лог</button>
+  <div class="row" id="apply-row" style="display:none">
+    <button id="apply-prompt" class="primary" style="flex:1">✏️ Применить изменения</button>
   </div>
   <div class="row">
     <button id="monitor" class="ghost">📊 Монитор</button>

@@ -81,6 +81,12 @@ function observationHasError(obs) {
   return false;
 }
 
+function shortModelName(modelId) {
+  if (!modelId) return '';
+  const parts = modelId.split('/');
+  return parts.length > 1 ? parts.slice(1).join('/') : modelId;
+}
+
 function renderActionBadge(action, opts = {}) {
   const label = formatActionHuman(action);
   const prefix = opts.prefix ? `<span style="opacity:.65;min-width:24px">${escapeHtml(opts.prefix)}</span>` : '';
@@ -190,6 +196,7 @@ function getOrCreateStep(stepNum) {
       screenshotUrl: null,
       modelDuration: 0,
       tokensUsed: 0,
+      modelId: '',
       error: null,
       logLines: [],
       timestamp: new Date(),
@@ -419,6 +426,7 @@ function renderStep(stepData) {
     <div class="step-header" onclick="toggleStep(${num})">
       <span class="step-num">#${num}</span>
       <span class="step-action-badge ${actionClass}">${escapeHtml(humanAction.slice(0, 50))}</span>
+      ${stepData.modelId ? `<span class="model-badge" title="${escapeHtml(stepData.modelId)}">🤖 ${escapeHtml(shortModelName(stepData.modelId))}</span>` : ''}
       ${stepData.modelDuration > 0 ? `<span class="step-duration">${(stepData.modelDuration / 1000).toFixed(1)}с</span>` : ''}
       ${stepData.tokensUsed > 0 ? `<span style="font-size:10px;color:#6b7280">🪙${stepData.tokensUsed}</span>` : ''}
       <span class="step-time">${time}</span>
@@ -722,6 +730,7 @@ function handleEvent(msg) {
       const step = getOrCreateStep(msg.step);
       step.modelDuration = msg.duration || 0;
       step.tokensUsed = msg.tokensUsed || 0;
+      step.modelId = msg.modelId || step.modelId || '';
       if (step.tokensUsed > 0) {
         tokenHistory.push({ step: msg.step, tokens: step.tokensUsed });
         updateTokenChart();
@@ -789,6 +798,25 @@ function handleEvent(msg) {
       updateStats();
       break;
 
+    // ---- Model rotation event (switch between models) ----
+    case 'model_rotation': {
+      const rotCard = document.createElement('div');
+      rotCard.className = 'step-card';
+      rotCard.style.borderColor = '#6366f1';
+      rotCard.style.background = 'rgba(99, 102, 241, 0.06)';
+      const rotReason = msg.reason === 'primary_recovered' ? '🔄 Возврат к основной модели' : '🔀 Смена модели';
+      const rotFrom = escapeHtml(shortModelName(msg.from));
+      const rotTo = escapeHtml(shortModelName(msg.to));
+      rotCard.innerHTML = `
+        <div class="step-header">
+          <span>🔀</span>
+          <span style="flex:1;font-size:11px;color:#c4b5fd">${rotReason}: ${rotFrom} (${msg.fromRating}%) → ${rotTo} (${msg.toRating}%)</span>
+        </div>`;
+      timeline.appendChild(rotCard);
+      timeline.scrollTop = timeline.scrollHeight;
+      break;
+    }
+
     // ---- Sleep events ----
 
     case 'sleep_started':
@@ -803,6 +831,11 @@ function handleEvent(msg) {
       if (isSleeping) {
         renderSleepEndCard('forced_by_user', Math.round((Date.now() - sleepStartTime) / 1000));
       }
+      break;
+
+    case 'task_updated':
+      if (msg.task) task = msg.task;
+      updateTaskDisplay();
       break;
 
     case 'finished':

@@ -6,6 +6,8 @@ const filter = $('filter');
 const pauseBtn = $('pause');
 const clearBtn = $('clear');
 const status = $('status');
+const exportHtmlBtn = $('export-html');
+const exportApiBtn = $('export-api');
 
 let paused = false;
 let lines = [];
@@ -57,6 +59,36 @@ pauseBtn.addEventListener('click', () => {
 clearBtn.addEventListener('click', () => {
   main.innerHTML = '';
   lines = [];
+});
+
+// Export HTML report
+exportHtmlBtn.addEventListener('click', async () => {
+  addLine('⏳ Генерация HTML-отчёта...');
+  try {
+    const r = await chrome.runtime.sendMessage({ kind: 'export_html_report' });
+    if (r?.ok) {
+      addLine('📥 HTML-отчёт скачан', 'ok');
+    } else {
+      addLine('Ошибка экспорта: ' + (r?.error || 'нет данных сессии'), 'err');
+    }
+  } catch (e) {
+    addLine('Ошибка: ' + e.message, 'err');
+  }
+});
+
+// Export API log
+exportApiBtn.addEventListener('click', async () => {
+  addLine('⏳ Генерация API-лога...');
+  try {
+    const r = await chrome.runtime.sendMessage({ kind: 'export_api_log' });
+    if (r?.ok) {
+      addLine('📡 API-лог скачан', 'ok');
+    } else {
+      addLine('Ошибка экспорта: ' + (r?.error || 'нет данных сессии'), 'err');
+    }
+  } catch (e) {
+    addLine('Ошибка: ' + e.message, 'err');
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg) => {

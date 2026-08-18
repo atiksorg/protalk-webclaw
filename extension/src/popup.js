@@ -59,8 +59,14 @@ function appendLog(line, cls) {
 
 function refresh() {
   dot.className = 'dot ' + (running ? (paused ? 'paused' : 'working') : 'idle');
+
+  // Show/hide buttons individually: hide Start while running, hide Pause+Stop while idle
+  startBtn.style.display = running ? 'none' : '';
+  pauseBtn.style.display = running ? '' : 'none';
+  stopBtn.style.display  = running ? '' : 'none';
+
   startBtn.disabled = running;
-  stopBtn.disabled = !running;
+  stopBtn.disabled  = !running;
   pauseBtn.disabled = !running;
   pauseBtn.textContent = paused ? '▶ Продолжить' : '⏸ Пауза';
   const src = configSource === 'remote' ? 'Gist' : 'локал.';
@@ -73,13 +79,15 @@ function refresh() {
 // --- Live Prompt Editing ---
 function updateApplyVisibility() {
   if (running) {
-    startRow.style.display = 'none';
+    // Hide only the Start button, keep Pause+Stop visible (refresh() manages their visibility)
+    startBtn.style.display = 'none';
     // Show apply row only if task field has changed from its original value
     const origTask = taskEl.dataset.original ?? undefined;
     const dirty = origTask !== undefined && taskEl.value.trim() !== origTask;
     applyRow.style.display = dirty ? '' : 'none';
     taskEl.classList.toggle('field-dirty', origTask !== undefined && taskEl.value.trim() !== origTask);
   } else {
+    startBtn.style.display = '';
     startRow.style.display = '';
     applyRow.style.display = 'none';
     taskEl.classList.remove('field-dirty');

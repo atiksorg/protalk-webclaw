@@ -249,7 +249,7 @@ async function attemptResume() {
     const elapsedSec = Math.round(elapsed / 1000);
     const wakeEntry = {
       action: `[СИСТЕМА] Пробуждение из глубокой гибернации`,
-      observation: `Прошло ~${elapsedSec} секунд (${Math.round(elapsedSec / 60)} мин). Причина сна: ${sleepResult.reason || '?'}. Запрошено было: ${sleepResult.requestedDurationSec || '?'}сек. Текущее состояние стра��ицы — на скриншоте.`
+      observation: `Прошло ~${elapsedSec} секунд (${Math.round(elapsedSec / 60)} мин). Причина сна: ${sleepResult.reason || '?'}. Запрошено было: ${sleepResult.requestedDurationSec || '?'}сек. Текущее состояние страницы — на скриншоте.`
     };
     runtime.history.push(wakeEntry);
     if (runtime.history.length > MAX_HISTORY) {

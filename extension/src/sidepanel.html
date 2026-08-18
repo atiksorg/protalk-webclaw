@@ -129,10 +129,16 @@
     .step-card.has-error { border-left: 3px solid #dc2626; }
 
     .step-header {
-      display: flex; align-items: center; gap: 6px;
+      display: flex; flex-direction: column; gap: 4px;
       padding: 8px 10px;
       cursor: pointer;
       user-select: none;
+    }
+    .step-header-row-1, .step-header-row-2 {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .step-header-row-2 {
+      padding-left: 34px; /* align with content after step-num */
     }
     .step-num {
       font-weight: 700; color: #5b8def; font-size: 12px;

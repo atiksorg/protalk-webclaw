@@ -305,7 +305,7 @@ function renderSleepStartCard(mode, reason, maxDurationSec, startedAt) {
   card.style.borderColor = borderColor;
   card.style.background = bgColor;
   card.innerHTML = `
-    <div class="step-header" onclick="toggleStep('${cardId}')" style="cursor:pointer">
+    <div class="step-header" onclick="toggleStep('${cardId}')" style="cursor:pointer;flex-direction:row;align-items:center;gap:6px">
       <span style="font-size:18px">${icon}</span>
       <span class="step-action-badge ${badgeClass}">${badgeText}</span>
       <span class="sleep-card-timer" id="sleep-card-timer" style="font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:${color}">0:00</span>
@@ -367,7 +367,7 @@ function renderSleepEndCard(wakeReason, elapsedSec) {
   card.style.borderColor = borderColor;
   card.style.background = bgColor;
   card.innerHTML = `
-    <div class="step-header">
+    <div class="step-header" style="flex-direction:row;align-items:center;gap:6px">
       <span style="font-size:18px">${icon}</span>
       <span class="step-action-badge ${badgeClass}">${badgeText}</span>
       <span style="flex:1;font-size:12px;color:${textColor}">${escapeHtml(label)}${timeText}</span>
@@ -424,12 +424,16 @@ function renderStep(stepData) {
 
   let html = `
     <div class="step-header" onclick="toggleStep(${num})">
-      <span class="step-num">#${num}</span>
-      <span class="step-action-badge ${actionClass}">${escapeHtml(humanAction.slice(0, 50))}</span>
-      ${stepData.modelId ? `<span class="model-badge" title="${escapeHtml(stepData.modelId)}">🤖 ${escapeHtml(shortModelName(stepData.modelId))}</span>` : ''}
-      ${stepData.modelDuration > 0 ? `<span class="step-duration">${(stepData.modelDuration / 1000).toFixed(1)}с</span>` : ''}
-      ${stepData.tokensUsed > 0 ? `<span style="font-size:10px;color:#6b7280">🪙${stepData.tokensUsed}</span>` : ''}
-      <span class="step-time">${time}</span>
+      <div class="step-header-row-1">
+        <span class="step-num">#${num}</span>
+        <span class="step-action-badge ${actionClass}">${escapeHtml(humanAction.slice(0, 50))}</span>
+        <span class="step-time">${time}</span>
+      </div>
+      <div class="step-header-row-2">
+        ${stepData.modelId ? `<span class="model-badge" title="${escapeHtml(stepData.modelId)}">🤖 ${escapeHtml(shortModelName(stepData.modelId))}</span>` : ''}
+        ${stepData.modelDuration > 0 ? `<span class="step-duration">${(stepData.modelDuration / 1000).toFixed(1)}с</span>` : ''}
+        ${stepData.tokensUsed > 0 ? `<span style="font-size:10px;color:#6b7280">🪙${stepData.tokensUsed}</span>` : ''}
+      </div>
     </div>
     <div class="step-body" id="step-body-${num}">`;
 
@@ -808,7 +812,7 @@ function handleEvent(msg) {
       const rotFrom = escapeHtml(shortModelName(msg.from));
       const rotTo = escapeHtml(shortModelName(msg.to));
       rotCard.innerHTML = `
-        <div class="step-header">
+        <div class="step-header" style="flex-direction:row;align-items:center;gap:6px">
           <span>🔀</span>
           <span style="flex:1;font-size:11px;color:#c4b5fd">${rotReason}: ${rotFrom} (${msg.fromRating}%) → ${rotTo} (${msg.toRating}%)</span>
         </div>`;
@@ -854,7 +858,7 @@ function handleEvent(msg) {
       const finEmoji = msg.ok ? '✅' : '❌';
       const finText = msg.ok ? (msg.answer || 'Готово') : (msg.reason || 'Остановлено');
       finCard.innerHTML = `
-        <div class="step-header">
+        <div class="step-header" style="flex-direction:row;align-items:center;gap:6px">
           <span>${finEmoji}</span>
           <span style="flex:1;font-size:12px;color:${msg.ok ? '#86efac' : '#fca5a5'}">${escapeHtml(finText.slice(0, 150))}</span>
         </div>`;

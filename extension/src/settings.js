@@ -42,7 +42,7 @@ const KEY_AUTONOMY = 'autonomy_mode';            // 'full' = no confirmation, 's
 const KEY_BATCH_STEPS = 'batch_steps_per_item';      // Max model calls per batch item
 const KEY_AD_BLOCKLIST = 'ad_domain_blocklist';       // Ad/tracker domains to skip
 // v5.1 ProTalk file server
-const KEY_UPLOAD_TOKEN = 'protalk_upload_token';
+// (protalk_upload_token removed — screenshots now sent as base64 directly)
 // v8.0 Token budget
 const KEY_TOKEN_LIMIT = 'token_limit';
 // v9.0 Sleep mode
@@ -96,7 +96,7 @@ const DEFAULTS = {
   batch_steps_per_item: 5,        // Max model calls per batch item (micro-loop)
   ad_domain_blocklist: 'rtb.mts.ru,sm.rtb.mts.ru,doubleclick.net,googlesyndication.com,googleadservices.com,facebook.com/tr,analytics.google.com',  // Ad/tracker domains to skip in frame discovery
   // v5.1 ProTalk file server
-  protalk_upload_token: '',       // Custom upload token for ProTalk file server (optional)
+  // (protalk_upload_token removed — screenshots now sent as base64 directly)
   // v8.0 Token budget
   token_limit: 1000000,           // Max total tokens per session — hard stop when exceeded
   // v9.0 Sleep mode
@@ -153,7 +153,7 @@ function readSync() {
         batch_steps_per_item: typeof items[KEY_BATCH_STEPS] === 'number' ? items[KEY_BATCH_STEPS] : DEFAULTS.batch_steps_per_item,
         ad_domain_blocklist: items[KEY_AD_BLOCKLIST] || DEFAULTS.ad_domain_blocklist,
         // v5.1 ProTalk file server
-        protalk_upload_token: items[KEY_UPLOAD_TOKEN] || '',
+        // (protalk_upload_token removed — screenshots now sent as base64 directly)
         // v8.0 Token budget
         token_limit: typeof items[KEY_TOKEN_LIMIT] === 'number' ? items[KEY_TOKEN_LIMIT] : DEFAULTS.token_limit,
         // v9.0 Sleep mode
@@ -184,11 +184,10 @@ function readSync() {
 /** Read secrets from chrome.storage.local (device-local, never synced). */
 function readLocalSecrets() {
   return new Promise((resolve) => {
-    chrome.storage.local.get([KEY_TOKEN, KEY_API_KEY, KEY_UPLOAD_TOKEN], (items) => {
+    chrome.storage.local.get([KEY_TOKEN, KEY_API_KEY], (items) => {
       resolve({
         auth_token: items[KEY_TOKEN] || '',
-        api_key: items[KEY_API_KEY] || '',
-        protalk_upload_token: items[KEY_UPLOAD_TOKEN] || ''
+        api_key: items[KEY_API_KEY] || ''
       });
     });
   });
@@ -245,7 +244,6 @@ export function setSettings(partial) {
     // Secrets go to chrome.storage.local (device-local, never synced)
     if (partial.auth_token !== undefined) localPatch[KEY_TOKEN] = partial.auth_token;
     if (partial.api_key !== undefined) localPatch[KEY_API_KEY] = partial.api_key;
-    if (partial.protalk_upload_token !== undefined) localPatch[KEY_UPLOAD_TOKEN] = partial.protalk_upload_token;
 
     // Everything else goes to chrome.storage.sync
     if (partial.user_email !== undefined) syncPatch[KEY_EMAIL] = partial.user_email;
@@ -329,7 +327,7 @@ export function setSettings(partial) {
 export function clearSettings() {
   return new Promise((resolve) => {
     chrome.storage.sync.clear(() => {
-      chrome.storage.local.remove([KEY_TOKEN, KEY_API_KEY, KEY_UPLOAD_TOKEN, 'settings_cache'], () => resolve({ ok: true }));
+      chrome.storage.local.remove([KEY_TOKEN, KEY_API_KEY, 'settings_cache'], () => resolve({ ok: true }));
     });
   });
 }

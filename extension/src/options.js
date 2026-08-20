@@ -271,7 +271,7 @@ const FULL_SETTINGS_KEYS = [
   'agent_viewport_width', 'agent_viewport_height',
   'wait_timeout_default', 'wait_error_detection', 'wait_progress_stall_threshold',
   'action_delay_ms', 'max_actions_per_session', 'autonomy_mode',
-  'batch_steps_per_item', 'ad_domain_blocklist', 'protalk_upload_token',
+  'batch_steps_per_item', 'ad_domain_blocklist',
   'token_limit', 'sleep_poll_interval_ms', 'sleep_max_duration_ms',
   'deep_sleep_poll_interval_ms', 'deep_sleep_max_duration_ms',
   'fast_track_delay_ms', 'mouse_move_jitter', 'mouse_move_base_delay',

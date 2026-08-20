@@ -14,7 +14,6 @@
 // status codes, duration) for debugging and HTML report generation.
 
 import { broadcast, MODEL_TIMEOUT_MS } from './bus.js';
-import { uploadScreenshot, isDataUrl } from './file_upload.js';
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -116,17 +115,8 @@ class ProTalkProvider {
   async callModel(settings, userText, imageDataUrl, onTaskCreated, sessionLogger, abortCheck, systemPrompt) {
     const content = [{ type: 'text', text: userText }];
     if (imageDataUrl) {
-      // Upload screenshot to file server and get public URL
-      let imageUrl = imageDataUrl;
-      try {
-        if (isDataUrl(imageDataUrl)) {
-          imageUrl = await uploadScreenshot(imageDataUrl);
-        }
-      } catch (e) {
-        // Fall back to original data URL if upload fails
-        console.warn('Screenshot upload failed, using data URL:', e.message);
-      }
-      content.push({ type: 'image_url', image_url: { url: imageUrl } });
+      // Send base64 data URL directly — no intermediate upload needed
+      content.push({ type: 'image_url', image_url: { url: imageDataUrl } });
     }
     const payload = {
       base_url: 'https://openrouter.ai/api/v1/chat/completions',
@@ -250,17 +240,7 @@ class OpenAIProvider {
     const baseUrl = (settings.api_base_url || 'https://api.openai.com/v1').replace(/\/+$/, '');
     const apiKey = settings.api_key || settings.auth_token;
     
-    // Upload screenshot if it's a data URL
-    let processedImageUrl = imageDataUrl;
-    if (imageDataUrl && isDataUrl(imageDataUrl)) {
-      try {
-        processedImageUrl = await uploadScreenshot(imageDataUrl);
-      } catch (e) {
-        console.warn('Screenshot upload failed, using data URL:', e.message);
-      }
-    }
-    
-    const messages = buildMultimodalMessages(userText, processedImageUrl, systemPrompt);
+    const messages = buildMultimodalMessages(userText, imageDataUrl, systemPrompt);
 
     const body = {
       model: settings.model,
@@ -335,21 +315,14 @@ class AnthropicProvider {
     // Anthropic uses a different message format
     const content = [{ type: 'text', text: userText }];
     if (imageDataUrl) {
-      // Upload screenshot to file server and get public URL
-      let imageUrl = imageDataUrl;
-      try {
-        if (isDataUrl(imageDataUrl)) {
-          imageUrl = await uploadScreenshot(imageDataUrl);
-        }
-      } catch (e) {
-        console.warn('Screenshot upload failed, using data URL:', e.message);
+      // Parse data URL directly — Anthropic supports base64 source
+      const match = imageDataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (match) {
+        content.unshift({
+          type: 'image',
+          source: { type: 'base64', media_type: match[1], data: match[2] }
+        });
       }
-      
-      // Anthropic supports URL type for images
-      content.unshift({
-        type: 'image',
-        source: { type: 'url', url: imageUrl }
-      });
     }
 
     const body = {
